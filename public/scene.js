@@ -43,7 +43,7 @@ function load(name) {
 // ถ้ามี PNG ของอาชีพนั้น จะใช้แทนสไปรต์ที่วาดในโค้ด (sprites/<jobId>.js) ถ้าไม่มีก็ใช้ของเดิม — ดู public/sprites/png/README.md
 // ---------------------------------------------------------------------------
 const PNG_DIR = "./sprites/png";
-const PNG_ANIMS = ["idle", "work", "sit"];
+const PNG_ANIMS = ["idle", "work", "sit", "walk"];
 const PNG_MAX_FRAMES = 8;
 const PNG_TARGET_H = 46; // ความสูงตัวละคร (px ที่ zoom 1) ให้ใกล้เคียงสไปรต์ที่วาดในโค้ด — ภาพจากตัวจำลองจะถูกย่อ/ขยายให้พอดีอัตโนมัติ
 const pngs = new Map(); // jobId -> { anims: { idle: [canvas], work: [canvas]|null, sit: [canvas]|null }, scale, offsetY } | null
@@ -138,7 +138,8 @@ function loadPng(jobId) {
     // ย่อ/ขยายให้ตัวละคร (หลังตัดขอบ) สูงราว PNG_TARGET_H แล้วคูณด้วย manifest.scale (ค่าเริ่มต้น 1)
     const autoScale = PNG_TARGET_H / Math.max(1, idle[0].height);
     const userScale = Number(manifest?.scale) > 0 ? Number(manifest.scale) : 1;
-    const sprite = { anims, scale: autoScale * userScale, offsetY: Number(manifest?.offsetY) || 0 };
+    // facing = ทิศที่ภาพหันอยู่ ("left" = หันซ้าย/ซ้ายล่าง ค่าเริ่มต้น) ใช้ตัดสินว่าต้องกลับด้านภาพเมื่อเดินไปอีกทางหรือไม่
+    const sprite = { anims, scale: autoScale * userScale, offsetY: Number(manifest?.offsetY) || 0, facing: manifest?.facing === "right" ? "right" : "left" };
     pngs.set(jobId, sprite);
     console.info(`[scene] ใช้สไปรต์ PNG ของ ${jobId} (idle ${idle.length} เฟรม${anims.work ? `, work ${anims.work.length}` : ""}${anims.sit ? ", sit" : ""}; ตัดขอบแล้ว ${idle[0].width}x${idle[0].height} px, scale ${sprite.scale.toFixed(2)})`);
     return sprite;
@@ -242,6 +243,7 @@ export function createScene(canvas, S, hooks = {}) {
   let common = null; // { items, emotes, fx } layers
   let bg = null; // offscreen พื้น + ตึกฉากหลัง
   let mapImg = null; // ฉากหลังแบบภาพ { img, spots, zones, spare, charScale, fit } | null — ถ้ามี พิกัดตำแหน่ง (tx, ty) = เปอร์เซ็นต์ของภาพ (0–100)
+  const walkers = new Map(); // agentId -> { fx, fy, tx, ty, t0, dur, dir, then } การเดินที่กำลังเกิด (positions[id] ถูกอัปเดตทุกเฟรม)
   const packets = [], ripples = [], particles = [], fxList = [], floats = [], bubbles = [];
   const emotes = new Map(); // agentId -> { type, t0, loop }
   let destroyed = false;
@@ -305,6 +307,7 @@ export function createScene(canvas, S, hooks = {}) {
   // ----- เลย์เอาต์ -----
   function assignSpots() {
     positions.clear();
+    walkers.clear();
     const used = new Set();
     let spare = 0, resIdx = 0;
     for (const a of S.agents.values()) {
@@ -322,7 +325,7 @@ export function createScene(canvas, S, hooks = {}) {
         if (!spot || used.has(spot.join())) spot = MAP.spareSpots[spare++ % MAP.spareSpots.length];
       }
       used.add(spot.join());
-      positions.set(a.id, { tx: spot[0], ty: spot[1], jobId });
+      positions.set(a.id, { tx: spot[0], ty: spot[1], jobId, home: { tx: spot[0], ty: spot[1] } }); // home = จุดประจำ (กลับมาเมื่อเดินเสร็จ)
       if (!modules.has(jobId)) load(jobId).then(() => { charCache.delete(jobId); hooks.onSpriteLoaded?.(jobId); });
       if (!pngs.has(jobId)) loadPng(jobId).then((p) => { if (p) { charCache.delete(jobId); hooks.onSpriteLoaded?.(jobId); } });
     }
@@ -482,26 +485,39 @@ export function createScene(canvas, S, hooks = {}) {
       return;
     }
     let rows, dy = 0;
-    if (paused) rows = L.body.anims.sit?.[0] || L.body.anims.idle[0];
+    const wk = walkers.get(a.id);
+    if (wk) { // กำลังเดิน: ใช้เฟรม walk ถ้ามี ไม่งั้นใช้ idle + ขยับขึ้นลงเร็ว ๆ
+      const f = L.body.anims.walk || L.body.anims.idle; rows = f[Math.floor(ts / 140) % f.length];
+      if (!L.body.anims.walk) dy = Math.floor(ts / 160) % 2 ? -1 * V.scale : 0;
+    } else if (paused) rows = L.body.anims.sit?.[0] || L.body.anims.idle[0];
     else if (working) { const f = L.body.anims.work || L.body.anims.idle; rows = f[Math.floor(ts / 180) % f.length]; }
     else { const f = L.body.anims.idle; rows = f[Math.floor(ts / 500) % f.length]; if (f.length === 1) dy = Math.floor(ts / 500) % 2 ? -1 * V.scale : 0; }
-    if (V.hover === a.id) { ctx.save(); ctx.shadowColor = a.color || "#fff"; ctx.shadowBlur = 16; drawLayer(L.body, rows, m.x, m.y + dy, m.s); ctx.restore(); }
-    else drawLayer(L.body, rows, m.x, m.y + dy, m.s);
-    if (working && L.effect) {
+    ctx.save();
+    if (wk && wk.dir > 0) { ctx.translate(2 * m.x, 0); ctx.scale(-1, 1); } // สไปรต์ที่วาดหันซ้าย → กลับด้านเมื่อเดินไปทางขวา
+    if (V.hover === a.id) { ctx.shadowColor = a.color || "#fff"; ctx.shadowBlur = 16; }
+    drawLayer(L.body, rows, m.x, m.y + dy, m.s);
+    ctx.restore();
+    if (working && !wk && L.effect) {
       const f = L.effect.anims.main; drawLayer(L.effect, f[Math.floor(ts / 150) % f.length], m.x, m.y, m.s);
     }
   }
   function drawPngCharacter(a, m, P, ts) {
     const working = a.status === "working", paused = a.status === "paused";
-    let frames = P.anims.idle, period = 500;
-    if (paused && P.anims.sit) frames = P.anims.sit;
+    const wk = walkers.get(a.id);
+    let frames = P.anims.idle, period = 500, dy = 0;
+    if (wk) { // กำลังเดิน: เฟรม walk ถ้ามี ไม่งั้น idle + ขยับขึ้นลง
+      if (P.anims.walk) { frames = P.anims.walk; period = 140; } else dy = Math.floor(ts / 160) % 2 ? -1 * V.scale : 0;
+    } else if (paused && P.anims.sit) frames = P.anims.sit;
     else if (working && P.anims.work) { frames = P.anims.work; period = 180; }
+    else if (frames.length === 1 && !working && !paused) dy = Math.floor(ts / 500) % 2 ? -1 * V.scale : 0; // โยกตัวเบา ๆ ตอนว่าง
     const img = frames[Math.floor(ts / period) % frames.length];
     const k = V.scale * P.scale * (mapImg?.charScale || 1);
     const w = img.width * k, h = img.height * k;
-    const dy = !working && !paused && frames.length === 1 && Math.floor(ts / 500) % 2 ? -1 * V.scale : 0; // โยกตัวเบา ๆ ตอนว่างถ้ามีเฟรมเดียว
+    // กลับด้านภาพเมื่อเดินสวนทางกับทิศที่ภาพหันอยู่ (facing ใน manifest, ค่าเริ่มต้น "left")
+    const flip = wk && ((wk.dir > 0) === (P.facing === "left"));
     ctx.save();
     ctx.imageSmoothingEnabled = false; // พิกเซลอาร์ตขยายแล้วต้องคม
+    if (flip) { ctx.translate(2 * m.x, 0); ctx.scale(-1, 1); }
     if (V.hover === a.id) { ctx.shadowColor = a.color || "#fff"; ctx.shadowBlur = 16; }
     ctx.drawImage(img, Math.round(m.x - w / 2), Math.round(m.y - h + P.offsetY * V.scale + dy), Math.round(w), Math.round(h));
     ctx.restore();
@@ -770,6 +786,7 @@ export function createScene(canvas, S, hooks = {}) {
     ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, V.W, V.H);
+    updateWalkers(ts);
     drawSky(ts);
     drawGround(ts);
     const drawables = [];
@@ -794,6 +811,39 @@ export function createScene(canvas, S, hooks = {}) {
     drawPackets(dt, ts);
     if (V.debug) drawDebug();
     V.raf = requestAnimationFrame(frame);
+  }
+
+  // ----- การเดินตามเหตุการณ์งาน -----
+  // app.js เรียก visit(ผู้เดิน, ผู้ถูกไปหา): เดินไปยืนข้าง ๆ เป้าหมาย หยุดครู่หนึ่ง แล้วเดินกลับจุดประจำ (home)
+  // ใช้กับ: รับงานจากกัปตัน / รับงานส่งต่อจากเพื่อน / เอาผลงานไปส่งกัปตัน
+  const WALK_SPEED = 120; // พิกเซลบนจอต่อวินาที
+  function walkTo(agentId, target, then) {
+    const pos = positions.get(agentId); if (!pos || !target) return;
+    const a = toScreen(pos.tx, pos.ty), b = toScreen(target.tx, target.ty);
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    if (dist < 2) { walkers.delete(agentId); then?.(); return; }
+    walkers.set(agentId, { fx: pos.tx, fy: pos.ty, tx: target.tx, ty: target.ty, t0: performance.now(), dur: (dist / WALK_SPEED) * 1000, dir: b.x >= a.x ? 1 : -1, then });
+  }
+  function nearSpot(targetId) { // จุดยืนข้าง ๆ เป้าหมาย (เยื้องซ้ายล่างเล็กน้อย ไม่ทับกัน)
+    const t = positions.get(targetId); if (!t) return null;
+    return mapImg ? { tx: t.tx - 4.5, ty: t.ty + 2.5 } : { tx: t.tx - 1.2, ty: t.ty + 0.7 };
+  }
+  function goHome(agentId) {
+    const pos = positions.get(agentId); if (!pos?.home) return;
+    walkTo(agentId, pos.home);
+  }
+  function visit(agentId, targetId, { returnHome = true, stayMs = 700 } = {}) {
+    if (!agentId || !targetId || agentId === targetId) return;
+    const spot = nearSpot(targetId); if (!spot || !positions.has(agentId)) return;
+    walkTo(agentId, spot, () => { if (returnHome) setTimeout(() => { if (!destroyed) goHome(agentId); }, stayMs); });
+  }
+  function updateWalkers(ts) {
+    for (const [id, w] of walkers) {
+      const pos = positions.get(id); if (!pos) { walkers.delete(id); continue; }
+      const k = Math.min(1, (ts - w.t0) / w.dur);
+      pos.tx = w.fx + (w.tx - w.fx) * k; pos.ty = w.fy + (w.ty - w.fy) * k;
+      if (k >= 1) { walkers.delete(id); w.then?.(); }
+    }
   }
 
   // ----- โหมดช่วยปรับพิกัด (กด D) -----
@@ -879,5 +929,5 @@ export function createScene(canvas, S, hooks = {}) {
 
   layout();
   V.raf = requestAnimationFrame(frame);
-  return { ready, layout, spawnPacket, emote, fx, burst, hit, setHover: (id) => { V.hover = id; }, spriteDataUrl, hasSprite: (jobId) => !!modules.get(jobId) || !!pngs.get(jobId), hasPng: (jobId) => !!pngs.get(jobId), hasMapImage: () => !!mapImg, jobOf: (a) => positions.get(a.id)?.jobId || null, destroy };
+  return { ready, layout, spawnPacket, emote, fx, burst, hit, setHover: (id) => { V.hover = id; }, spriteDataUrl, hasSprite: (jobId) => !!modules.get(jobId) || !!pngs.get(jobId), hasPng: (jobId) => !!pngs.get(jobId), hasMapImage: () => !!mapImg, visit, goHome, isWalking: (id) => walkers.has(id), jobOf: (a) => positions.get(a.id)?.jobId || null, destroy };
 }

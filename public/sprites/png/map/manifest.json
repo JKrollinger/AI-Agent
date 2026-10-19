@@ -1,23 +1,23 @@
 {
   "image": "morroc.png",
   "fit": "contain",
-  "charScale": 1,
+  "charScale": 0.6,
   "spots": {
-    "lord-knight": [0.50, 0.56],
-    "sniper": [0.30, 0.80],
-    "stalker": [0.40, 0.86],
-    "high-wizard": [0.78, 0.36],
-    "professor": [0.76, 0.70],
-    "whitesmith": [0.22, 0.40],
-    "high-priest": [0.52, 0.24]
+    "lord-knight": [0.455, 0.51],
+    "sniper": [0.42, 0.23],
+    "stalker": [0.57, 0.23],
+    "high-wizard": [0.69, 0.38],
+    "professor": [0.89, 0.52],
+    "whitesmith": [0.65, 0.90],
+    "high-priest": [0.28, 0.37]
   },
   "zones": {
-    "plaza": [0.50, 0.47],
-    "gate": [0.33, 0.92],
-    "tower": [0.80, 0.28],
-    "library": [0.78, 0.62],
-    "forge": [0.20, 0.32],
-    "temple": [0.52, 0.16]
+    "plaza": [0.455, 0.63],
+    "gate": [0.49, 0.12],
+    "tower": [0.69, 0.27],
+    "library": [0.89, 0.40],
+    "forge": [0.65, 0.79],
+    "temple": [0.28, 0.26]
   },
-  "spare": [[0.2, 0.95], [0.6, 0.95], [0.9, 0.9]]
+  "spare": [[0.10, 0.82], [0.355, 0.82], [0.80, 0.70]]
 }

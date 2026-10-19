@@ -130,6 +130,7 @@ function handle(ev) {
     case "task.assigned":
       upsertTask(d.task);
       spawnPacket(d.from || "captain", d.to, trunc(d.task.title, 26), S.agents.get(d.to)?.color || "#fff", d.from && d.from !== "captain" ? "handoff" : "assign");
+      sc().visit(d.to, d.from || "captain"); // ผู้รับเดินไปรับงานจากกัปตัน/เพื่อน แล้วกลับมาทำที่จุดประจำ
       mark("tasks", "kpis", "drawer", "strip", "roster");
       break;
     case "task.handoff":
@@ -141,6 +142,7 @@ function handle(ev) {
     case "task.completed":
       upsertTask(d.task);
       spawnPacket(d.from, "captain", "ส่งผลงาน ✓", S.agents.get(d.from)?.color || "#3dd598", "return");
+      sc().visit(d.from, "captain"); // เดินไปส่งผลงานให้กัปตัน แล้วกลับจุดประจำ
       sc().emote(d.from, "heart");
       mark("tasks", "kpis", "drawer", "strip", "roster");
       break;
@@ -474,7 +476,7 @@ function toast(msg, kind = "") {
 // ---------------------------------------------------------------------------
 const canvas = $("#floor");
 let scene = null;
-const sc = () => scene || { spawnPacket() {}, emote() {}, fx() {}, burst() {}, layout() {}, setHover() {}, spriteDataUrl: () => null, jobOf: () => null };
+const sc = () => scene || { spawnPacket() {}, emote() {}, fx() {}, burst() {}, layout() {}, setHover() {}, visit() {}, goHome() {}, spriteDataUrl: () => null, jobOf: () => null };
 const avatarCache = new Map(); // jobId -> data URL
 async function initScene() {
   try {
@@ -484,6 +486,7 @@ async function initScene() {
       onHover: (id) => highlightRoster(id),
       onSpriteLoaded: (jobId) => { avatarCache.delete(jobId); mark("roster", "strip", "metrics", "drawer"); },
     });
+    window.__scene = scene; // สำหรับดีบักจาก console (เช่น __scene.visit("res-1", "captain"))
     scene.ready.then(() => { avatarCache.clear(); scene.layout(); mark("roster", "metrics", "drawer", "tasks", "strip"); });
     if (S.agents.size) scene.layout();
   } catch (err) {
