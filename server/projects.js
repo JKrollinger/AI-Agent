@@ -3,7 +3,8 @@
 //   project.json  การตั้งค่า (ไฟล์ที่ให้อ่าน, ตำแหน่งที่ใช้ได้, โมเดล/ความลึก/หน้าที่เฉพาะโปรเจกต์, QA, งบ)
 //   brief.md      สรุปโปรเจกต์ 1 หน้า (ถือเป็นคำสั่งของผู้ใช้ → เข้า system prompt)
 //   skills/<role>.md  ทักษะเพิ่มเฉพาะโปรเจกต์ (ต่อท้ายคู่มือกลาง หรือแทนที่ถ้าบรรทัดแรกเป็น <!-- replace -->)
-//   out/<jobId>/  ผลงานที่ระบบเขียนกลับ (result.md, tasks/NN-*.md, plan.json, job.json) + out/latest.md
+//   out/<jobId>/  ผลงานที่ระบบเขียนกลับ (result.md, tasks/NN-*.md, plan.json, job.json, patches/NN-*.diff) + out/latest.md
+// project.json อาจให้สิทธิ์ "แก้ไฟล์จริง" เป็นรายเอเจนต์ (permissions.<agentId>) → ดู apply.js (Claude Code headless + ด่านอนุมัติ)
 // ศูนย์ควบคุมเก็บทะเบียนโปรเจกต์ (id → path) ใน data/projects.json
 // ไฟล์ของโปรเจกต์ (README/CLAUDE.md/docs) ถูกใส่ใน prompt เป็น "ข้อมูลอ้างอิง" ไม่ใช่คำสั่ง และผ่านการปิดบังค่าลับก่อนเสมอ
 import fs from "node:fs";
@@ -38,6 +39,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   plan: { roles: [], maxTasks: 8 }, // roles = ตำแหน่งที่กัปตันใช้ได้ในโปรเจกต์นี้ ([] = ทุกตำแหน่ง) reviewer ใช้ได้เสมอ; maxTasks นับเฉพาะงานผลิต (ระบบเติมงาน QA ปิดท้ายให้อีก 1)
   roles: {}, // { coder: { model, effort, toolsEnabled, instructions, maxTokens, duties } }
   agents: {}, // { "dev-1": { model, effort, toolsEnabled, duties } }
+  // สิทธิ์แก้ไฟล์จริงเป็นรายเอเจนต์ — ค่าเริ่มต้นคือ "ไม่มีสิทธิ์" (ทีมได้แค่เสนอ ไม่แตะไฟล์)
+  // { "dev-1": { write: ["src/**", "tests/**"], deny: [".env*", "**/*.pem"], tools: ["Edit", "Write", "Bash(npm test)"], maxUsd: 5, timeoutSec: 900 } }
+  permissions: {},
   qa: { maxAttempts: 3, passScore: 70 },
   budget: { maxUsdPerJob: null }, // null = ไม่ได้ตั้ง (ใช้ env MAX_USD_PER_JOB), 0 = ไม่จำกัดชัดเจน (ตรวจจาก usage จริงทุกครั้งที่มอบหมายงาน)
   output: { dir: ".grock/out" },
@@ -309,6 +313,125 @@ function validateOverride(src = {}, { allowDuties = true, allowInstructions = fa
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// สิทธิ์แก้ไฟล์จริงเป็นรายเอเจนต์ (permissions.<agentId>) — ใช้โดย apply.js
+// ---------------------------------------------------------------------------
+/** เครื่องมือของ Claude Code ที่อนุญาตให้ระบุได้: ชื่อตรง ๆ หรือ Bash(<แพตเทิร์นคำสั่ง>) ที่ไม่มีอักขระต่อคำสั่งของเชลล์ */
+const PERM_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit"]);
+const PERM_BASH_RE = /^Bash\(([^()\r\n"'`$|&;<>\\]{1,160})\)$/;
+const PERM_DEFAULT_TOOLS = ["Edit", "Write"];
+/** โฟลเดอร์ที่ห้ามเขียนเสมอ ไม่ว่าสิทธิ์จะกว้างแค่ไหน (ผลงาน/ระบบ/การตั้งค่าของเครื่องมือ) */
+export const WRITE_ALWAYS_DENY_DIRS = new Set([PACK_DIR, ".git", ".claude", "node_modules", ".svn", ".hg"]);
+const PERM_KNOWN_KEYS = new Set(["write", "deny", "tools", "maxUsd", "timeoutSec", "model", "sandboxIgnore", "linkDeps"]);
+
+/** glob แบบ posix (`**` ข้ามโฟลเดอร์, `*`/`?` ภายในชื่อ) → RegExp เทียบกับ path สัมพัทธ์; "src" (ไม่มี wildcard) = ไฟล์นั้นหรือทุกอย่างใต้ src/ */
+export function globToRegExp(glob) {
+  let g = String(glob).replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+  if (!g) g = "**";
+  const hasWild = /[*?]/.test(g);
+  let re = "";
+  for (let i = 0; i < g.length; i++) {
+    const ch = g[i];
+    if (ch === "*") {
+      if (g[i + 1] === "*") {
+        i++;
+        if (g[i + 1] === "/") { i++; re += "(?:.*/)?"; } else re += ".*";
+      } else re += "[^/]*";
+    } else if (ch === "?") re += "[^/]";
+    else re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}${hasWild ? "" : "(?:/.*)?"}$`, process.platform === "win32" ? "i" : "");
+}
+
+/** ทำ glob ของสิทธิ์ให้สะอาดและปลอดภัย (คืน null ถ้าใช้ไม่ได้) */
+function cleanGlob(g) {
+  if (typeof g !== "string") return null;
+  const s = g.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+  if (!s || s.length > 200 || s.includes("\0") || s.includes(":") || s.startsWith("/") || s.split("/").some((seg) => seg === "..")) return null;
+  return s;
+}
+
+function normalizePermissions(raw, warnings) {
+  const out = {};
+  if (raw === undefined) return out;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) { warnings.push("permissions ต้องเป็น object { \"<agentId>\": { write, deny, tools } } — ข้าม"); return out; }
+  for (const [idRaw, v] of Object.entries(raw)) {
+    const id = stripCtl(idRaw).trim().slice(0, 40);
+    const where = `permissions.${id}`;
+    if (!/^[a-z0-9][a-z0-9_-]{0,39}$/i.test(id)) { warnings.push(`${where}: id ของเอเจนต์ไม่ถูกต้อง — ข้าม`); continue; }
+    if (!v || typeof v !== "object" || Array.isArray(v)) { warnings.push(`${where}: ต้องเป็น object — ข้าม`); continue; }
+    const write = [];
+    for (const g of Array.isArray(v.write) ? v.write : v.write !== undefined ? [v.write] : []) {
+      const c = cleanGlob(g);
+      if (c) write.push(c); else warnings.push(`${where}.write: glob "${stripCtl(String(g)).slice(0, 60)}" ไม่ถูกต้อง (ห้าม .. / path สัมบูรณ์) — ข้าม`);
+    }
+    if (!write.length) { warnings.push(`${where}: ไม่มี write glob ที่ใช้ได้ → ไม่มีสิทธิ์แก้ไฟล์`); continue; }
+    const deny = [];
+    for (const g of Array.isArray(v.deny) ? v.deny : []) {
+      const c = cleanGlob(g);
+      if (c) deny.push(c); else warnings.push(`${where}.deny: glob "${stripCtl(String(g)).slice(0, 60)}" ไม่ถูกต้อง — ข้าม`);
+    }
+    let tools = [];
+    const rawTools = Array.isArray(v.tools) ? v.tools : v.tools !== undefined ? [v.tools] : null;
+    if (rawTools === null) tools = [...PERM_DEFAULT_TOOLS];
+    else {
+      for (const t of rawTools) {
+        const s = typeof t === "string" ? t.trim() : "";
+        if (PERM_TOOL_NAMES.has(s) || PERM_BASH_RE.test(s)) { if (!tools.includes(s)) tools.push(s); }
+        else warnings.push(`${where}.tools: "${stripCtl(String(t)).slice(0, 60)}" ไม่อนุญาต (ใช้ได้: ${[...PERM_TOOL_NAMES].join(", ")}, Bash(<คำสั่ง>) ที่ไม่มี ; & | $ \` < >) — ข้าม`);
+      }
+      if (!tools.some((t) => /^(Edit|Write|NotebookEdit)$/.test(t))) { warnings.push(`${where}.tools: ต้องมี Edit หรือ Write อย่างน้อย 1 ตัวจึงจะแก้ไฟล์ได้ → ไม่มีสิทธิ์แก้ไฟล์`); continue; }
+    }
+    const sandboxIgnore = (asArray(v.sandboxIgnore) || []).map((s) => s.replace(/[\\/]+$/, "")).filter((s) => s && !s.includes("/") && !s.includes("\\") && s !== "..");
+    const perm = {
+      write,
+      deny,
+      tools,
+      maxUsd: v.maxUsd === undefined || v.maxUsd === null ? 5 : Number.isFinite(Number(v.maxUsd)) && Number(v.maxUsd) >= 0 ? Math.min(100, Number(v.maxUsd)) : 5, // 0 = ไม่จำกัดที่ฝั่ง CLI
+      timeoutSec: clampInt(v.timeoutSec, 30, 3600, 900),
+      sandboxIgnore,
+      linkDeps: v.linkDeps !== false,
+    };
+    if (v.model !== undefined) {
+      if (ALLOWED_MODELS.includes(v.model)) perm.model = v.model;
+      else warnings.push(`${where}: model "${stripCtl(String(v.model)).slice(0, 40)}" ไม่อยู่ในรายการที่อนุญาต — ข้าม`);
+    }
+    for (const k of Object.keys(v)) if (!PERM_KNOWN_KEYS.has(k)) warnings.push(`${where}: ไม่รู้จักคีย์ "${stripCtl(k).slice(0, 60)}" — ข้าม`);
+    out[id] = perm;
+  }
+  return out;
+}
+
+const grantReCache = new WeakMap(); // perm -> { write: RegExp[], deny: RegExp[] }
+function grantRes(perm) {
+  let r = grantReCache.get(perm);
+  if (!r) { r = { write: perm.write.map(globToRegExp), deny: perm.deny.map(globToRegExp) }; grantReCache.set(perm, r); }
+  return r;
+}
+
+/** สิทธิ์แก้ไฟล์ของเอเจนต์ในโปรเจกต์นี้ (null = ไม่มีสิทธิ์ → ทีมได้แค่เสนอ) */
+export function writeGrantFor(pack, agentId) {
+  const p = pack?.config?.permissions?.[agentId];
+  return p && p.write?.length ? p : null;
+}
+
+/**
+ * เอเจนต์นี้แก้ path นี้ได้ไหม: ต้องตรง write glob, ไม่ตรง deny glob, ไม่ใช่ไฟล์ค่าลับ/โฟลเดอร์ระบบ (deny-list กลาง) และไม่อยู่ใน .grock/.git/.claude/node_modules
+ * @returns {{ok:boolean, reason:string|null}}
+ */
+export function canWritePath(perm, relPosix) {
+  const rel = String(relPosix || "").replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+  if (!rel || rel.startsWith("/") || rel.includes(":") || rel.split("/").some((s) => s === ".." || s === "")) return { ok: false, reason: "path ไม่ถูกต้อง" };
+  const segs = rel.split("/");
+  if (segs.some((s) => WRITE_ALWAYS_DENY_DIRS.has(s.toLowerCase()))) return { ok: false, reason: "โฟลเดอร์ระบบ/ผลงาน (ห้ามเขียนเสมอ)" };
+  if (isDeniedPath(rel)) return { ok: false, reason: "ไฟล์ต้องห้าม (ค่าลับ/ระบบ)" };
+  if (!perm) return { ok: false, reason: "ไม่มีสิทธิ์แก้ไฟล์" };
+  const r = grantRes(perm);
+  if (r.deny.some((re) => re.test(rel))) return { ok: false, reason: "อยู่ใน deny ของโปรเจกต์" };
+  if (!r.write.some((re) => re.test(rel))) return { ok: false, reason: `ไม่ตรง write glob (${perm.write.join(", ")})` };
+  return { ok: true, reason: null };
+}
+
 function normalizeConfig(raw, warnings) {
   const c = raw && typeof raw === "object" ? raw : {};
   const ctx = c.context && typeof c.context === "object" ? c.context : {};
@@ -358,6 +481,7 @@ function normalizeConfig(raw, warnings) {
     plan: { roles: planRoles, maxTasks: clampInt(plan.maxTasks, 1, 8, DEFAULT_CONFIG.plan.maxTasks) },
     roles,
     agents,
+    permissions: normalizePermissions(c.permissions, warnings),
     qa: { maxAttempts: clampInt(qa.maxAttempts, 1, 5, DEFAULT_CONFIG.qa.maxAttempts), passScore: clampInt(qa.passScore, 0, 100, DEFAULT_CONFIG.qa.passScore) },
     budget: { maxUsdPerJob: budget.maxUsdPerJob === undefined || budget.maxUsdPerJob === null ? null : Number.isFinite(Number(budget.maxUsdPerJob)) && Number(budget.maxUsdPerJob) >= 0 ? Number(budget.maxUsdPerJob) : null },
     output: { dir: outDirOk ? outDir : DEFAULT_CONFIG.output.dir },
@@ -660,6 +784,7 @@ function taskMarkdown(task, agentName) {
     `- สถานะ: ${task.status} (รอบที่ ${task.attempts})`,
     `- ต้นทุน: $${(task.usage?.costUsd || 0).toFixed(4)} · โทเคนเข้า ${task.usage?.inputTokens || 0} / ออก ${task.usage?.outputTokens || 0}${task.toolCalls ? ` · ใช้เครื่องมือ ${task.toolCalls} ครั้ง` : ""}`,
     task.review ? `- ผลตรวจ QA: ${task.review.score}/100 ${task.review.approved ? "ผ่าน" : "ไม่ผ่าน"}${task.review.summary ? ` — ${task.review.summary}` : ""}` : "",
+    task.patch ? `- Patch: ${task.patch.rel} (${task.patch.status}, ${(task.patch.files || []).length} ไฟล์)` : "",
     "",
     "## รายละเอียดงาน",
     task.description || "-",
@@ -685,11 +810,25 @@ function jobJson(ctx, job) {
       tasks: [...ctx.tasks.values()].map((t) => ({
         id: t.id, seq: t.seq, title: t.title, role: t.role, status: t.status, assignedTo: t.assignedTo, attempts: t.attempts,
         usage: t.usage, toolCalls: t.toolCalls, review: t.review ? { score: t.review.score, approved: t.review.approved } : null, file: `tasks/${taskFileName(t)}`,
+        // audit ของการแก้ไฟล์จริง: patch ล่าสุด + ประวัติทุก patch ของงานนี้ (สถานะ pending/applied/rejected/superseded/error + ผู้ตัดสินใจ/เวลา/หมายเหตุ)
+        patch: t.patch ? patchAudit(t.patch) : null,
+        patches: (t.patches || []).map(patchAudit),
       })),
     },
     null,
     2,
   ) + "\n";
+}
+
+/** ส่วนของ task.patch ที่เก็บลง job.json (ไม่เอา preview ก้อนใหญ่) */
+function patchAudit(p) {
+  return {
+    file: p.rel, status: p.status, agentId: p.agentId, attempt: p.attempt, mode: p.mode, sha256: p.sha256,
+    files: (p.files || []).map((f) => ({ path: f.path, kind: f.kind, add: f.add, del: f.del })),
+    rejected: p.rejected || [], denied: p.denied || [],
+    createdAt: p.createdAt ? fmtTs(p.createdAt) : null, decidedAt: p.decidedAt ? fmtTs(p.decidedAt) : null, decidedBy: p.decidedBy || null, note: p.note || "",
+    lastError: p.lastError || null, cli: p.cli || null,
+  };
 }
 
 function resultMarkdown(ctx, job) {
@@ -715,7 +854,7 @@ export function attachWriter(bus, { agentNameOf = () => "" } = {}) {
   const handler = (ev) => {
     try {
       const d = ev.data || {};
-      if (ev.type === "task.completed" || ev.type === "task.failed" || ev.type === "task.updated" || ev.type === "task.created") {
+      if (ev.type === "task.completed" || ev.type === "task.failed" || ev.type === "task.updated" || ev.type === "task.created" || ev.type === "task.patch") {
         const task = d.task; if (!task) return;
         const ctx = getJobContext(task.jobId); if (!ctx) return;
         ctx.tasks.set(task.id, task);

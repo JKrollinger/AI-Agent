@@ -341,3 +341,31 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .proj-select:focus { outline: none; border-color: var(--accent); }
 .chip.proj { color: var(--accent); background: rgba(245, 185, 66, 0.12); }
 .outdir { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); padding: 0 12px 10px; word-break: break-all; }
+
+/* ---------- Patch รออนุมัติ (Developer แก้ไฟล์จริงผ่าน Claude Code headless — apply.js) ---------- */
+.chip.patch { color: var(--warn); background: rgba(255, 165, 82, 0.14); border: 1px solid rgba(255, 165, 82, 0.4); }
+.chip.patch.pending { animation: toolpulse 1.3s ease-in-out infinite; }
+.chip.patch.applied { color: var(--ok); background: rgba(61, 213, 152, 0.12); border-color: rgba(61, 213, 152, 0.4); animation: none; }
+.chip.patch.rejected, .chip.patch.superseded { color: var(--muted); background: var(--card-2); border-color: var(--line); }
+.chip.patch.error { color: var(--bad); border-color: rgba(255, 95, 109, 0.4); }
+.tabs .count .pending-badge { color: var(--warn); font-weight: 700; }
+.legend .dot.patch { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.patch-box { border-radius: 10px; padding: 10px 12px; background: var(--card); border: 1px solid rgba(255, 165, 82, 0.35); min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.patch-box .r-line2 { white-space: normal; word-break: break-all; overflow: visible; text-overflow: clip; }
+.patch-box .r-line2 + .r-line2 { display: block; }
+.patch-files { display: grid; gap: 3px; margin-top: 6px; font-size: 12px; }
+.patch-files .pf { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.patch-files .k { font-size: 10px; font-weight: 700; text-align: center; border-radius: 4px; padding: 0 4px; background: var(--card-2); }
+.patch-files .k.added { color: var(--ok); }
+.patch-files .k.deleted { color: var(--bad); }
+.patch-files .k.modified { color: var(--info); }
+.patch-files .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Consolas, "Courier New", monospace; }
+.patch-files .n { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.patch-controls { margin-top: 8px; }
+.patch-controls .note { min-width: 140px; }
+.task .patch-controls { margin-top: 6px; }
+.stream.diff { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px; max-height: 320px; margin-top: 8px; }
+.stream.diff .add { color: var(--ok); }
+.stream.diff .del { color: var(--bad); }
+.stream.diff .hk { color: var(--info); }
+.stream.diff .hd { color: var(--muted); }

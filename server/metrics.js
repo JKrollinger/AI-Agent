@@ -18,7 +18,9 @@ export function recordUsage(agent, task, usage = {}, model = agent.model) {
     warnedModels.add(used);
     console.warn(`[metrics] ไม่รู้ราคาของโมเดล "${used}" → คิดตามราคาของ "${agent.model}" (เพิ่มใน PRICING ของ server/agents.js)`);
   }
-  const cost = estimateCost(used, usage, agent.model); // รวมค่า web search ต่อครั้งแล้ว (ถ้ามี usage.server_tool_use)
+  // ต้นทุนที่เครื่องมือรายงานมาเอง (เช่น total_cost_usd จาก Claude Code headless) ถือเป็นค่าจริง ไม่ต้องประมาณจากตารางราคา
+  const reported = Number(usage.total_cost_usd);
+  const cost = Number.isFinite(reported) && reported >= 0 ? reported : estimateCost(used, usage, agent.model); // รวมค่า web search ต่อครั้งแล้ว (ถ้ามี usage.server_tool_use)
   agent.metrics.inputTokens += inTok;
   agent.metrics.outputTokens += outTok;
   agent.metrics.cacheReadTokens = (agent.metrics.cacheReadTokens || 0) + cacheRead;

@@ -9,6 +9,7 @@ import { ROLES, estimateCost, ALLOWED_MODELS, ALLOWED_EFFORTS, MAX_DUTIES_LENGTH
 import { liveAvailable } from "./llm.js";
 import { saveTeamOverrides } from "./team-store.js";
 import { loadPack, buildProjectContext, effectiveAgent, setJobContext, getJobContext, readProjectFiles, jobOutputDir } from "./projects.js";
+import { applyPatchToProject, rejectPatchOfProject, markPatch, readPatch } from "./apply.js";
 
 const MAX_ATTEMPTS = 3;
 const TERMINAL = new Set(["done", "cancelled"]);
@@ -314,6 +315,12 @@ async function start(task, agent) {
   task.phase = "เริ่มทำงาน";
   task.activeTool = null;
   agent.activeTool = null;
+  if (task.patch?.status === "pending") { // ทำรอบใหม่ (QA ส่งกลับ/สั่งทำใหม่) → patch เดิมที่ยังไม่ตัดสินใจถือว่าตกไป
+    task.patch = { ...task.patch, status: "superseded", decidedAt: now(), decidedBy: "system", note: `ถูกแทนที่โดยรอบที่ ${task.attempts}` };
+    try { markPatch(task.patch, "superseded", task.patch.note); } catch {}
+    task.history.push({ t: now(), type: "patch", note: `patch ${task.patch.rel} ตกไป (ทำรอบใหม่)` });
+    emitTask("task.patch", task, { action: "superseded" });
+  }
   task.history.push({ t: now(), type: "started", agentId: agent.id, note: `เริ่มทำ (รอบที่ ${task.attempts})` });
   emitTask("task.started", task);
 
@@ -344,7 +351,12 @@ async function start(task, agent) {
   }
 }
 
-function progress(task, agent, { phase, progress: p, text, tool, toolStarted }) {
+function progress(task, agent, { phase, progress: p, text, tool, toolStarted, note, level }) {
+  if (note) { // ข้อความจาก executor/adapter ที่ต้องเข้า log และประวัติงาน (เช่น ถอยไปทำแบบข้อเสนอเพราะไม่มี claude CLI)
+    task.history.push({ t: now(), type: "note", agentId: agent.id, note });
+    bus.log(`ℹ️ ${note}`, { taskId: task.id, agentId: agent.id, ...(level ? { level } : {}) });
+    if (!phase && p === undefined && text === undefined && tool === undefined) return;
+  }
   const phaseChanged = phase && phase !== task.phase;
   const toolChanged = tool !== undefined && tool !== task.activeTool;
   if (phase) {
@@ -393,6 +405,14 @@ function finish(task, agent, result) {
   }
   const toolNote = result.toolCalls ? `, ใช้เครื่องมือ ${result.toolCalls} ครั้ง` : "";
   task.history.push({ t: now(), type: "done", agentId: agent.id, note: `เสร็จใน ${fmtDuration(task.durationMs)}${toolNote}` });
+  // งานแก้ไฟล์จริง: patch ถูกเขียนไว้ใน .grock/out แล้ว แต่ยังไม่แตะไฟล์ของโปรเจกต์ → รอผู้ควบคุมอนุมัติ (สถานะงานยัง done เพื่อให้ QA ตรวจต่อได้)
+  const patch = result.patch || null;
+  if (patch) {
+    task.patch = patch;
+    task.patches = [...(task.patches || []), patch];
+    task.phase = "รออนุมัติ patch";
+    task.history.push({ t: now(), type: "patch", agentId: agent.id, note: `ส่ง patch ${patch.files.length} ไฟล์ (+${patch.stats.add} −${patch.stats.del}) รออนุมัติ: ${patch.rel}${patch.rejected?.length ? ` · ตัดไฟล์นอกสิทธิ์ ${patch.rejected.length} ไฟล์` : ""}` });
+  }
 
   agent.status = "idle";
   agent.currentTaskId = null;
@@ -406,6 +426,10 @@ function finish(task, agent, result) {
     `✅ ${agent.name} ทำ "${task.title}" เสร็จใน ${fmtDuration(task.durationMs)} (ต้นทุน $${task.usage.costUsd.toFixed(4)}${toolNote})`,
     { agentId: agent.id, taskId: task.id },
   );
+  if (patch) {
+    emitTask("task.patch", task, { action: "pending" });
+    bus.log(`🩹 ${agent.name} ส่ง patch ${patch.files.length} ไฟล์ รออนุมัติ (${patch.mode === "sim" ? "จำลอง" : "Claude Code"}) → ${patch.rel}${patch.rejected?.length ? ` — ตัดไฟล์นอกสิทธิ์ออก ${patch.rejected.length} ไฟล์: ${patch.rejected.map((r) => r.path).join(", ")}` : ""}`, { agentId: agent.id, taskId: task.id, jobId: task.jobId, level: patch.rejected?.length ? "warn" : undefined });
+  }
 
   if (task.reviewOfId && task.review) handleReview(task, agent);
   void checkJob(task.jobId);
@@ -740,6 +764,75 @@ export function configureAgent(agentId, { model, effort, toolsEnabled, duties } 
     }
   }
   return agentView(a);
+}
+
+// ====================================================================
+// ด่านอนุมัติ patch (งานแก้ไฟล์จริงของ Developer) — ทุกขั้นลง task.history + job.json (ผ่าน task.patch event) + logs/events.jsonl
+// ====================================================================
+function pendingPatchTask(taskId) {
+  const task = getTask(taskId);
+  if (!task) throw new HttpError(404, "ไม่พบงาน");
+  if (!task.patch || task.patch.status !== "pending") throw new HttpError(409, "งานนี้ไม่มี patch ที่รออนุมัติ");
+  if (task.patch.applying) throw new HttpError(409, "กำลัง apply patch นี้อยู่");
+  const jc = getJobContext(task.jobId);
+  if (!jc) throw new HttpError(409, "บริบทโปรเจกต์ของโจทย์นี้ถูกเก็บกวาดไปแล้ว (โจทย์เก่า) — ใช้ไฟล์ patch ใน .grock/out กับ git apply เอง");
+  let pack = jc.pack;
+  try { pack = loadPack(jc.pack.id); } catch {} // ใช้สิทธิ์ล่าสุดจาก project.json (ผู้ใช้ถอนสิทธิ์ก่อน apply ได้)
+  return { task, pack };
+}
+
+/** นำ patch เข้าโปรเจกต์จริง (git apply --check → git apply) */
+export function applyPatch(taskId, { note = "" } = {}) {
+  const { task, pack } = pendingPatchTask(taskId);
+  const n = String(note || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  task.patch.applying = true;
+  try {
+    const r = applyPatchToProject({ pack, patch: task.patch, note: n, by: "dashboard" });
+    task.patch = { ...task.patch, status: "applied", decidedAt: now(), decidedBy: "dashboard", note: n, appliedFiles: r.files, gitCheck: r.gitCheck?.note || null, lastError: null };
+    task.phase = "apply patch แล้ว";
+    task.history.push({ t: now(), type: "patch", note: `ผู้ควบคุมอนุมัติ → apply ${r.files.length} ไฟล์เข้าโปรเจกต์แล้ว${n ? ` — ${n}` : ""} (${r.gitCheck?.note || "ตรวจแล้ว"})` });
+    emitTask("task.updated", task);
+    emitTask("task.patch", task, { action: "applied", files: r.files });
+    bus.log(`✅ apply patch ของ "${task.title}" เข้าโปรเจกต์ ${pack.name} แล้ว (${r.files.length} ไฟล์: ${r.files.join(", ")})${n ? ` — ${n}` : ""}`, { taskId: task.id, jobId: task.jobId });
+  } catch (err) {
+    const msg = (err.message || String(err)).slice(0, 400);
+    task.patch = { ...task.patch, lastError: msg };
+    task.history.push({ t: now(), type: "patch", note: `apply ไม่สำเร็จ: ${msg}` });
+    emitTask("task.patch", task, { action: "error", error: msg });
+    bus.log(`⚠️ apply patch ของ "${task.title}" ไม่สำเร็จ: ${msg}`, { taskId: task.id, jobId: task.jobId, level: "warn" });
+    throw new HttpError(409, msg);
+  } finally {
+    delete task.patch.applying;
+  }
+  return task;
+}
+
+/** เนื้อหา patch ฉบับเต็ม (ต้นฉบับ ไม่ปิดบัง เพราะผู้ใช้บนเครื่องนี้ต้องใช้ตรวจ/apply เอง) */
+export function getTaskPatch(taskId) {
+  const task = getTask(taskId);
+  if (!task) throw new HttpError(404, "ไม่พบงาน");
+  if (!task.patch) throw new HttpError(404, "งานนี้ไม่มี patch");
+  const jc = getJobContext(task.jobId);
+  let diff = null, error = null;
+  if (!jc) error = "บริบทโปรเจกต์ของโจทย์นี้ถูกเก็บกวาดไปแล้ว — เปิดไฟล์ใน .grock/out ของโปรเจกต์เอง";
+  else {
+    try { diff = readPatch(jc.pack, task.patch).text; } catch (err) { error = err.message; }
+  }
+  return { taskId: task.id, patch: task.patch, diff, error };
+}
+
+/** ปฏิเสธ patch (ไม่แตะไฟล์) */
+export function rejectPatch(taskId, { reason = "" } = {}) {
+  const { task } = pendingPatchTask(taskId);
+  const r = String(reason || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  try { rejectPatchOfProject({ patch: task.patch, reason: r, by: "dashboard" }); } catch (err) { throw new HttpError(409, err.message); }
+  task.patch = { ...task.patch, status: "rejected", decidedAt: now(), decidedBy: "dashboard", note: r };
+  task.phase = "ปฏิเสธ patch";
+  task.history.push({ t: now(), type: "patch", note: `ผู้ควบคุมปฏิเสธ patch${r ? ` — ${r}` : ""}` });
+  emitTask("task.updated", task);
+  emitTask("task.patch", task, { action: "rejected" });
+  bus.log(`🚫 ปฏิเสธ patch ของ "${task.title}"${r ? ` — ${r}` : ""} (ไฟล์ในโปรเจกต์ไม่ถูกแตะ)`, { taskId: task.id, jobId: task.jobId, level: "warn" });
+  return task;
 }
 
 export function setMode(mode) {

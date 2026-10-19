@@ -11,6 +11,7 @@
   "plan": { "roles": [], "maxTasks": 8 },
   "roles": {},
   "agents": {},
+  "permissions": {},
   "qa": { "maxAttempts": 3, "passScore": 70 },
   "budget": { "maxUsdPerJob": 0 },
   "output": { "dir": ".grock/out" },

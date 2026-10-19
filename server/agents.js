@@ -42,6 +42,7 @@ export const TOOL_META = {
   code_execution: { icon: "⚙️", label: "รันโค้ด", phase: "กำลังรันโค้ด" },
   bash_code_execution: { icon: "⚙️", label: "รันโค้ด", phase: "กำลังรันโค้ด" },
   text_editor_code_execution: { icon: "📝", label: "แก้ไขไฟล์", phase: "กำลังแก้ไขไฟล์" },
+  claude_code: { icon: "🛠️", label: "Claude Code", phase: "กำลังใช้ Claude Code" }, // แก้ไฟล์จริงผ่าน Claude Code headless (apply.js)
 };
 
 export const ROLES = {

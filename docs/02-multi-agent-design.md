@@ -207,6 +207,6 @@ llm.onTool → executor.onProgress({ phase, tool, toolStarted }) → orchestrato
 
 - เอกสารของโปรเจกต์เข้า prompt ในฐานะ **ข้อมูลอ้างอิง** (บล็อก `<project_files>` ใน user message) ไม่ใช่คำสั่ง มีเพียง `brief.md` และ `roles.*.instructions` ที่เป็นคำสั่งใน system prompt
 - บริบทถูก freeze ต่อโจทย์ ทุกงาน (รวมรอบแก้ของ QA) เห็นบริบทเดียวกัน และบล็อกบริบทถูก cache
-- ระยะนี้ทีมไม่แก้ไฟล์ของโปรเจกต์ ผลงานทั้งหมดเป็นไฟล์ใน `.grock/out/<jobId>/` (ขั้นถัดไป: ให้ Developer แก้ไฟล์จริงผ่าน Claude Code headless พร้อมด่านอนุมัติ) เครื่องมือที่แตะไฟล์/ฐานข้อมูล/ระบบจริงต้องมี adapter และกำหนดสิทธิ์เป็นรายเอเจนต์ พร้อมบันทึกตรวจสอบย้อนหลัง (`logs/events.jsonl`, `job.json`)
+- ค่าเริ่มต้นทีมไม่แก้ไฟล์ของโปรเจกต์ ผลงานทั้งหมดเป็นไฟล์ใน `.grock/out/<jobId>/` เมื่อโปรเจกต์ให้สิทธิ์ใน `permissions.<agentId>` ตำแหน่ง Developer จะแก้ไฟล์จริงได้ผ่าน adapter `server/apply.js` (Claude Code headless ใน sandbox → patch รออนุมัติ → apply/ปฏิเสธบน dashboard) — เป็นแบบอย่างของกติกา "เครื่องมือที่แตะไฟล์/ฐานข้อมูล/ระบบจริงต้องมี adapter กำหนดสิทธิ์เป็นรายเอเจนต์ และมีบันทึกตรวจสอบย้อนหลัง" (`task.history`, `logs/events.jsonl`, `job.json`, `patches/*.json`)
 
 วิธีใช้ การตั้งค่า และข้อควรระวังด้านความปลอดภัยอยู่ใน [07-projects.md](07-projects.md)

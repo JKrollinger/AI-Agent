@@ -8,6 +8,10 @@
 //   node tools/grock.mjs run --goal-file goal.txt --project . --wait            (โจทย์ภาษาไทยยาว ๆ ใส่ไฟล์ได้)
 //   node tools/grock.mjs status <jobId>
 //   node tools/grock.mjs register <id> <โฟลเดอร์>                             ลงทะเบียนโฟลเดอร์ที่มี .grock/ อยู่แล้ว
+//   node tools/grock.mjs patches [jobId]                                       patch ของ Developer ที่รออนุมัติ (แก้ไฟล์จริง)
+//   node tools/grock.mjs patch <taskId>                                        พิมพ์ diff ฉบับเต็ม
+//   node tools/grock.mjs apply <taskId> [--note "..."]                         อนุมัติ → git apply เข้าโปรเจกต์
+//   node tools/grock.mjs reject <taskId> [--reason "..."]                      ปฏิเสธ (ไม่แตะไฟล์)
 //
 // ตั้ง GROCK_URL ถ้าเซิร์ฟเวอร์ไม่ได้อยู่ที่ http://127.0.0.1:3789
 import fs from "node:fs";
@@ -126,6 +130,12 @@ function handleEvent(ev, jobId) {
     case "task.failed":
       out(`${ts}  ${PHASE_ICON[ev.type]} [${t.role}] ${t.title}${ev.type === "task.completed" ? ` ($${(t.usage?.costUsd || 0).toFixed(4)})` : ""}${ev.type === "task.failed" ? ` — ${d.error || ""}` : ""}`);
       break;
+    case "task.patch":
+      if (d.action === "pending") out(`${ts}  🩹 patch รออนุมัติ: ${t.title} → ${t.patch?.rel} (${(t.patch?.files || []).length} ไฟล์)  อนุมัติ: apply ${t.id}  ปฏิเสธ: reject ${t.id}`);
+      else if (d.action === "applied") out(`${ts}  ✅ apply patch แล้ว: ${t.title} (${(d.files || []).length} ไฟล์)`);
+      else if (d.action === "rejected") out(`${ts}  🚫 ปฏิเสธ patch: ${t.title}`);
+      else if (d.action === "error") out(`${ts}  ⚠️ apply patch ไม่สำเร็จ: ${d.error || ""}`);
+      break;
     case "job.completed":
       out(`${ts}  🎉 เสร็จสมบูรณ์ ต้นทุน $${(j.costUsd || 0).toFixed(4)}`);
       if (j.outputDir) out(`ผลงาน: ${j.outputDir}/result.md`);
@@ -138,6 +148,17 @@ function handleEvent(ev, jobId) {
       break;
   }
   return undefined;
+}
+
+/** หลังโจทย์จบ: เตือนถ้ามี patch ของ Developer ที่ยังรออนุมัติ (ไฟล์ในโปรเจกต์ยังไม่เปลี่ยนจนกว่าจะ apply) */
+async function printPending(jobId) {
+  try {
+    const { tasks } = await api("GET", `/api/jobs/${encodeURIComponent(jobId)}`);
+    const pending = tasks.filter((t) => t.patch?.status === "pending");
+    if (!pending.length) return;
+    out(`🩹 มี patch รออนุมัติ ${pending.length} รายการ (ไฟล์ในโปรเจกต์ยังไม่ถูกแตะ):`);
+    for (const t of pending) out(`   ${t.id}  ${t.title}  → ${t.patch.rel}  (apply ${t.id} | reject ${t.id})`);
+  } catch {}
 }
 
 async function main() {
@@ -192,6 +213,7 @@ async function main() {
       if (job.outputDir) out(`ผลงานจะอยู่ที่: ${job.outputDir}`);
       if (!flags.wait) { out(`ติดตามได้ที่ ${BASE} หรือ: status ${job.id}`); break; }
       const code = await follow(job.id);
+      await printPending(job.id);
       process.exit(code);
     }
     case "status": {
@@ -199,8 +221,41 @@ async function main() {
       if (!id) die("ใช้: status <jobId>");
       const { job, tasks } = await api("GET", `/api/jobs/${encodeURIComponent(id)}`);
       out(`${job.id}  ${job.status}  $${(job.costUsd || 0).toFixed(4)}  ${job.goal}`);
-      for (const t of tasks) out(`  ${String(t.seq).padStart(2, "0")} [${t.role}] ${t.status.padEnd(9)} ${t.title}${t.review ? ` QA ${t.review.score}` : ""}`);
+      for (const t of tasks) out(`  ${String(t.seq).padStart(2, "0")} [${t.role}] ${t.status.padEnd(9)} ${t.title}${t.review ? ` QA ${t.review.score}` : ""}${t.patch ? ` 🩹 ${t.patch.status}` : ""}`);
       if (job.outputDir) out(`ผลงาน: ${job.outputDir}`);
+      await printPending(job.id);
+      break;
+    }
+    case "patches": {
+      const jobId = positional[0] || null;
+      const { tasks } = await api("GET", "/api/state");
+      const list = tasks.filter((t) => t.patch && (!jobId || t.jobId === jobId));
+      if (!list.length) { out("ไม่มี patch" + (jobId ? ` ของโจทย์ ${jobId}` : "")); break; }
+      for (const t of list) out(`${t.patch.status === "pending" ? "🩹" : "  "} ${t.id}  ${t.patch.status.padEnd(10)} ${String((t.patch.files || []).length).padStart(2)} ไฟล์  ${t.title}  → ${t.patch.rel}`);
+      out("อนุมัติ: apply <taskId>  ·  ปฏิเสธ: reject <taskId> --reason \"...\"  ·  ดู diff: patch <taskId>");
+      break;
+    }
+    case "patch": {
+      const id = positional[0];
+      if (!id) die("ใช้: patch <taskId>");
+      const r = await api("GET", `/api/tasks/${encodeURIComponent(id)}/patch`);
+      out(`# ${r.patch.rel}  (${r.patch.status}, ${(r.patch.files || []).length} ไฟล์, +${r.patch.stats?.add ?? 0} −${r.patch.stats?.del ?? 0})`);
+      if (r.error) out(`# ${r.error}`);
+      if (r.diff) process.stdout.write(r.diff.endsWith("\n") ? r.diff : r.diff + "\n");
+      break;
+    }
+    case "apply": {
+      const id = positional[0];
+      if (!id) die('ใช้: apply <taskId> [--note "..."]');
+      const { task } = await api("POST", `/api/tasks/${encodeURIComponent(id)}/apply`, { note: typeof flags.note === "string" ? flags.note : "" });
+      out(`✔ apply patch ของ "${task.title}" เข้าโปรเจกต์แล้ว: ${(task.patch.appliedFiles || []).join(", ")}`);
+      break;
+    }
+    case "reject": {
+      const id = positional[0];
+      if (!id) die('ใช้: reject <taskId> [--reason "..."]');
+      const { task } = await api("POST", `/api/tasks/${encodeURIComponent(id)}/reject`, { reason: typeof flags.reason === "string" ? flags.reason : "" });
+      out(`✔ ปฏิเสธ patch ของ "${task.title}" แล้ว (ไฟล์ไม่ถูกแตะ)`);
       break;
     }
     default:
@@ -211,6 +266,7 @@ async function main() {
       out('  run "<โจทย์>" --project <id|.> [--files a,b] [--wait]   (หรือ --goal-file ไฟล์)');
       out("  status <jobId>");
       out("  register <id> <โฟลเดอร์>");
+      out("  patches [jobId] · patch <taskId> · apply <taskId> [--note] · reject <taskId> [--reason]   (patch ของ Developer ที่รออนุมัติ)");
       process.exit(cmd ? 1 : 0);
   }
 }

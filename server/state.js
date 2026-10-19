@@ -64,6 +64,8 @@ export function createTask({ jobId, seq, title, description, role, dependsOn = [
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 },
     toolCalls: 0, // จำนวนครั้งที่ใช้เครื่องมือ (server tools) รวมทุกรอบ
     activeTool: null, // เครื่องมือที่กำลังใช้อยู่ตอนนี้ เช่น web_search (null = ไม่ได้ใช้)
+    patch: null, // patch ล่าสุดของงานแก้ไฟล์จริง { rel, status: pending|applied|rejected|superseded|error, files, rejected, preview, ... } (apply.js)
+    patches: [], // ประวัติ patch ทุกรอบของงานนี้ (audit)
     history: [{ t: Date.now(), type: "created", note: "สร้างงานโดยกัปตัน" }],
   };
   state.tasks.set(task.id, task);
@@ -126,6 +128,7 @@ export function snapshot() {
     failed: tasks.filter((t) => t.status === "failed").length,
     costUsd: agents.reduce((s, a) => s + a.metrics.costUsd, 0),
     toolCalls: agents.reduce((s, a) => s + (a.metrics.toolCalls || 0), 0),
+    pendingPatches: tasks.filter((t) => t.patch?.status === "pending").length, // งานแก้ไฟล์จริงที่รอผู้ควบคุมอนุมัติ
     workersBusy: agents.filter((a) => a.role !== "captain" && a.status === "working").length,
     workersTotal: agents.filter((a) => a.role !== "captain").length,
     jobsDone: jobs.filter((j) => j.status === "done").length,

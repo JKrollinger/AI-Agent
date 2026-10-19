@@ -8,7 +8,8 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "grock": "node tools/grock.mjs",
-    "smoke:live": "node --env-file-if-exists=.env tools/smoke-live.mjs"
+    "smoke:live": "node --env-file-if-exists=.env tools/smoke-live.mjs",
+    "test": "node tools/tests/run.mjs"
   },
   "engines": {
     "node": ">=22.9"

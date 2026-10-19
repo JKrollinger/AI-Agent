@@ -25,9 +25,45 @@ const TOOL_UI = {
   code_execution: { icon: "⚙️", label: "รันโค้ด" },
   bash_code_execution: { icon: "⚙️", label: "รันโค้ด" },
   text_editor_code_execution: { icon: "📝", label: "แก้ไฟล์" },
+  claude_code: { icon: "🛠️", label: "Claude Code" },
 };
 const toolUi = (name) => (name ? TOOL_UI[name] || { icon: "🔧", label: name } : null);
 const toolChip = (name) => { const t = toolUi(name); return t ? `${t.icon} ${esc(t.label)}` : ""; };
+
+// patch ของงาน "แก้ไฟล์จริง" (Developer ผ่าน Claude Code headless) — รอผู้ควบคุมกด apply/ปฏิเสธ
+const PATCH_TH = { pending: "รออนุมัติ", applied: "apply แล้ว", rejected: "ปฏิเสธแล้ว", superseded: "ตกไป (ทำรอบใหม่)", error: "ผิดพลาด" };
+const KIND_TH = { added: "เพิ่ม", modified: "แก้", deleted: "ลบ" };
+const patchChip = (t) => (t.patch ? `<span class="chip patch ${esc(t.patch.status)}">🩹 ${esc(PATCH_TH[t.patch.status] || t.patch.status)}</span>` : "");
+const pendingPatches = () => [...S.tasks.values()].filter((t) => t.patch?.status === "pending").length;
+function patchControls(t) {
+  if (!t.patch || t.patch.status !== "pending") return "";
+  return `<div class="controls patch-controls" data-patch="${t.id}">
+    <input type="text" class="note" placeholder="หมายเหตุ/เหตุผล (ไม่บังคับ)" />
+    <button class="btn small ok" data-apply="${t.id}">✅ Apply เข้าโปรเจกต์</button>
+    <button class="btn small danger" data-rejectpatch="${t.id}">✖ ปฏิเสธ</button>
+  </div>`;
+}
+function diffHtml(text) {
+  return String(text || "").split("\n").map((l) => {
+    const c = l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") ? "hd" : l.startsWith("@@") ? "hk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
+    return c ? `<span class="${c}">${esc(l)}</span>` : esc(l);
+  }).join("\n");
+}
+function patchSection(t) {
+  const p = t.patch;
+  if (!p) return "";
+  const files = (p.files || []).map((f) => `<div class="pf"><span class="k ${esc(f.kind)}">${esc(KIND_TH[f.kind] || f.kind)}</span><span class="p" title="${esc(f.path)}">${esc(f.path)}</span><span class="n">+${f.add} −${f.del}</span></div>`).join("");
+  const rejected = (p.rejected || []).length ? `<div class="r-line2" style="margin-top:6px;color:var(--warn)">ตัดออกเพราะนอกสิทธิ์: ${p.rejected.map((r) => `${esc(r.path)} (${esc(r.reason)})`).join(", ")}</div>` : "";
+  const decided = p.status !== "pending" ? `<div class="r-line2" style="margin-top:6px">${esc(PATCH_TH[p.status] || p.status)}${p.decidedAt ? ` · ${fmtTime(p.decidedAt)}` : ""}${p.note ? ` — ${esc(p.note)}` : ""}</div>` : `<div class="r-line2" style="margin-top:6px">ไฟล์ในโปรเจกต์ยังไม่ถูกแตะ — ตรวจ diff แล้วกด Apply (git apply --check ก่อนจริง) หรือปฏิเสธ</div>`;
+  const err = p.lastError ? `<div class="r-line2" style="color:var(--bad);margin-top:6px">⚠️ ${esc(p.lastError)}</div>` : "";
+  return `<div class="section"><h3>🩹 Patch (แก้ไฟล์จริง) ${patchChip(t)}</h3>
+    <div class="patch-box">
+      <div class="r-line2">${esc(p.rel)} · ${(p.files || []).length} ไฟล์ · +${p.stats?.add ?? 0} −${p.stats?.del ?? 0} · ${p.mode === "sim" ? "จำลอง (sim)" : "Claude Code"}${p.cli?.costUsd != null ? ` · $${Number(p.cli.costUsd).toFixed(4)}` : ""} <button class="btn small ghost" data-copytext="${esc(p.path)}">คัดลอกพาธ</button></div>
+      <div class="patch-files">${files}</div>${rejected}${decided}${err}
+      ${patchControls(t)}
+      <pre class="stream diff">${diffHtml(p.preview)}</pre>
+    </div></div>`;
+}
 
 // ---------------------------------------------------------------------------
 // สถานะฝั่ง client
@@ -139,6 +175,15 @@ function handle(ev) {
       toast(`🔁 ส่งต่อ "${trunc(d.task.title, 36)}" จาก ${agentName(d.from)} → ${agentName(d.to)}${d.score != null ? ` (QA ${d.score}/100)` : ""}`, "warn");
       mark("tasks", "drawer", "strip");
       break;
+    case "task.patch": {
+      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip");
+      const t = d.task, n = (t.patch?.files || []).length, who = t.patch?.agentName || agentName(lastAgentOf(t));
+      if (d.action === "pending") { toast(`🩹 ${who} ส่ง patch ${n} ไฟล์ รออนุมัติ: "${trunc(t.title, 36)}" — เปิดการ์ดงานเพื่อ Apply/ปฏิเสธ`, "warn"); const a = lastAgentOf(t); if (a) sc().emote(a, "question"); }
+      else if (d.action === "applied") toast(`✅ Apply patch "${trunc(t.title, 36)}" เข้าโปรเจกต์แล้ว (${(d.files || []).length} ไฟล์)`, "ok");
+      else if (d.action === "rejected") toast(`🚫 ปฏิเสธ patch "${trunc(t.title, 36)}" — ไฟล์ไม่ถูกแตะ`, "warn");
+      else if (d.action === "error") toast(`⚠️ Apply patch ไม่สำเร็จ: ${d.error || ""}`, "bad");
+      break;
+    }
     case "task.completed":
       upsertTask(d.task);
       spawnPacket(d.from, "captain", "ส่งผลงาน ✓", S.agents.get(d.from)?.color || "#3dd598", "return");
@@ -240,7 +285,8 @@ function renderKpis() {
     [fmtUsd(t.costUsd), "ต้นทุนรวม"],
   ];
   $("#kpis").innerHTML = items.map(([v, l]) => `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${l}</div></div>`).join("");
-  $("#cntTasks").textContent = S.tasks.size ? `(${S.tasks.size})` : "";
+  const pend = pendingPatches();
+  $("#cntTasks").innerHTML = (S.tasks.size ? `(${S.tasks.size})` : "") + (pend ? ` <span class="pending-badge" title="patch ของ Developer ที่รอคุณอนุมัติ">🩹${pend}</span>` : "");
   $("#cntResults").textContent = [...S.jobs.values()].filter((j) => j.status === "done").length || "";
 }
 
@@ -255,11 +301,13 @@ function taskCard(t, compact = false) {
     t.status === "done" ? fmtMs(t.durationMs) : "",
     t.review ? `QA ${t.review.score}/100${t.review.approved ? " ✓" : ""}` : "",
     t.toolCalls ? `🔧 เครื่องมือ ${t.toolCalls} ครั้ง` : "",
+    t.patch ? `🩹 patch ${(t.patch.files || []).length} ไฟล์` : "",
   ].filter(Boolean);
   return `<div class="task" data-task="${t.id}" style="border-left-color:${ri.color}">
-    <div class="row"><span class="title" title="${esc(t.title)}">${esc(t.title)}</span><span class="chip ${t.status}">${STATUS_TH[t.status] || t.status}</span></div>
+    <div class="row"><span class="title" title="${esc(t.title)}">${esc(t.title)}</span>${t.patch?.status === "pending" ? patchChip(t) : ""}<span class="chip ${t.status}">${STATUS_TH[t.status] || t.status}</span></div>
     ${compact ? "" : `<div class="sub">${sub.map(esc).join(" · ")}</div>`}
     ${active ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%;background:${ri.color}"></i></div><div class="sub"><span class="tool-chip${t.activeTool ? "" : " hidden"}" data-toolchip>${toolChip(t.activeTool)}</span><span class="phase">${esc(t.phase || "")}</span></div>` : ""}
+    ${compact ? "" : patchControls(t)}
   </div>`;
 }
 
@@ -371,7 +419,7 @@ function renderDrawer() {
   if (!S.selected) { box.classList.add("hidden"); return; }
   const { type, id } = S.selected;
   // เก็บค่าที่ผู้ใช้กำลังพิมพ์/เลือกในกล่องส่งต่อไว้ ไม่ให้หายเมื่อมี event ใหม่เข้ามา
-  const keep = { to: $("#drawer .controls .to")?.value, reason: $("#drawer .controls .reason")?.value };
+  const keep = { to: $("#drawer .controls .to")?.value, reason: $("#drawer .controls .reason")?.value, note: $("#drawer .patch-controls .note")?.value };
   let html = "";
   if (type === "agent") {
     const a = S.agents.get(id);
@@ -435,6 +483,7 @@ function renderDrawer() {
           <div class="controls" style="margin-top:6px">
             ${active ? `<button class="btn small danger" data-cancel="${t.id}">ยกเลิกงาน</button>` : `<button class="btn small" data-retry="${t.id}">🔄 ทำใหม่</button>`}
           </div></div>
+        ${patchSection(t)}
         ${t.review ? `<div class="section"><h3>ผลตรวจ QA</h3><div class="review-box"><div class="score" style="color:${t.review.approved ? "var(--ok)" : "var(--warn)"}">${t.review.score}/100 ${t.review.approved ? "ผ่าน" : t.review.acceptedWithNotes ? "รับพร้อมหมายเหตุ" : "ส่งกลับแก้"}</div>
           <div style="margin-top:4px">${esc(t.review.summary || "")}</div>${t.review.feedback ? `<pre class="stream" style="margin-top:8px">${esc(t.review.feedback)}</pre>` : ""}</div></div>` : ""}
         <div class="section"><h3>${t.status === "running" ? "ผลงานที่กำลังเขียน (สด)" : "ผลงาน"}</h3><pre class="stream ${t.status === "running" ? "live" : ""}" id="streamBox">${esc(t.status === "running" ? live || "กำลังเริ่ม…" : t.output || "—")}</pre></div>
@@ -446,6 +495,7 @@ function renderDrawer() {
   const toSel = $("#drawer .controls .to"), reasonIn = $("#drawer .controls .reason");
   if (toSel && keep.to && [...toSel.options].some((o) => o.value === keep.to)) toSel.value = keep.to;
   if (reasonIn && keep.reason) reasonIn.value = keep.reason;
+  const noteIn = $("#drawer .patch-controls .note"); if (noteIn && keep.note) noteIn.value = keep.note;
   const sb = $("#streamBox"); if (sb) sb.scrollTop = sb.scrollHeight;
 }
 
@@ -680,6 +730,13 @@ document.addEventListener("click", (e) => {
   if (el.dataset.resume) return act(api(`/api/agents/${el.dataset.resume}/resume`), () => {});
   if (el.dataset.cancel) return act(api(`/api/tasks/${el.dataset.cancel}/cancel`), () => toast("ยกเลิกงานแล้ว", "warn"));
   if (el.dataset.retry) return act(api(`/api/tasks/${el.dataset.retry}/retry`), () => toast("สั่งทำใหม่แล้ว"));
+  if (el.dataset.apply || el.dataset.rejectpatch) { // ด่านอนุมัติ patch ของ Developer (ผลลัพธ์มาทาง event task.patch)
+    const id = el.dataset.apply || el.dataset.rejectpatch;
+    const note = el.closest("[data-patch]")?.querySelector(".note")?.value.trim() || "";
+    el.disabled = true;
+    const p = el.dataset.apply ? api(`/api/tasks/${id}/apply`, { note }) : api(`/api/tasks/${id}/reject`, { reason: note });
+    return act(p.finally(() => { el.disabled = false; }), () => {});
+  }
   if (el.classList.contains("go")) {
     const box = el.closest("[data-handoff]");
     const agentId = box.querySelector(".to").value;

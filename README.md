@@ -101,6 +101,21 @@ node tools/grock.mjs run "เขียนแผนทดสอบสำหรั
 
 ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md)
 
+### ให้ Developer แก้ไฟล์จริง (ผ่าน Claude Code headless + ด่านอนุมัติ)
+
+ค่าเริ่มต้นทีมแค่ "เสนอ" ไม่แตะไฟล์ ถ้าต้องการให้ Developer (`dev-1`) แก้โค้ดในโปรเจกต์จริง ให้เพิ่มสิทธิ์ใน `.grock/project.json` ของโปรเจกต์นั้น:
+
+```json
+"permissions": { "dev-1": { "write": ["src/**", "tests/**"], "deny": [".env*"], "tools": ["Edit", "Write", "Bash(npm test)"], "maxUsd": 5 } }
+```
+
+- งานของ Developer จะรัน `claude -p` ใน **สำเนา** ของโปรเจกต์ (sandbox ใน temp ไม่มี .git/node_modules/ไฟล์ค่าลับ) โดยจำกัดเครื่องมือ/งบ/เวลา แล้วสรุปเป็น patch ที่ `.grock/out/<jobId>/patches/` — ไฟล์จริงยังไม่ถูกแตะ
+- การ์ดงานบน dashboard ขึ้น "🩹 รออนุมัติ" พร้อมปุ่ม **Apply เข้าโปรเจกต์** / **ปฏิเสธ** (หรือ `node tools/grock.mjs patches` · `apply <taskId>` · `reject <taskId>`) ตอน apply ระบบตรวจ sha256 ของ patch, สิทธิ์ล่าสุด, ทุก path, `git apply --check` และเทียบบรรทัดต้นฉบับแบบไบต์ต่อไบต์ก่อนเขียน
+- ทุกขั้นมีบันทึกใน `task.history`, `logs/events.jsonl`, `job.json` และ `patches/*.json` · โหมด `sim` จำลอง patch ที่ apply ได้จริงเพื่อทดสอบ flow โดยไม่เสียเงิน · ไม่มี `claude` CLI หรือไม่ให้สิทธิ์ → ทำแบบข้อเสนอเหมือนเดิมพร้อม log บอกเหตุผล (ตั้ง `CLAUDE_BIN` ใน `.env` ถ้า `claude` ไม่อยู่ใน PATH)
+- รายละเอียดสิทธิ์ ด่านอนุมัติ audit และข้อจำกัด: [docs/07-projects.md §5](docs/07-projects.md)
+
+ทดสอบทั้งชุด (unit + e2e ในโหมด sim กับโปรเจกต์ชั่วคราวใน temp ไม่เรียก API จริง): `npm test`
+
 ## REST API (ใช้ต่อกับระบบอื่นได้)
 
 | Method | Path | ใช้ทำอะไร |
@@ -113,6 +128,8 @@ node tools/grock.mjs run "เขียนแผนทดสอบสำหรั
 | POST | `/api/demo` | มอบหมายโจทย์ตัวอย่าง |
 | POST | `/api/tasks/:id/handoff` `{agentId, reason}` | ส่งต่องาน |
 | POST | `/api/tasks/:id/retry` · `/cancel` | ทำใหม่ / ยกเลิก |
+| POST | `/api/tasks/:id/apply` `{note}` · `/reject` `{reason}` | อนุมัติ (git apply --check → เขียนไฟล์จริง) / ปฏิเสธ patch ของ Developer |
+| GET | `/api/tasks/:id/patch` | diff ฉบับเต็มของ patch |
 | POST | `/api/agents/:id/pause` · `/resume` | หยุด / ให้กลับมาทำงาน |
 | POST | `/api/agents/:id/config` `{duties, model, effort, toolsEnabled}` | ตั้งค่าต่อคน (หน้าที่/โมเดล/ความลึก/เครื่องมือ) บันทึกลง `data/team.json` |
 | GET | `/api/jobs/:id` | รายละเอียดโจทย์ + งานย่อย (สคริปต์ภายนอกใช้ติดตามผล) |
@@ -125,7 +142,8 @@ node tools/grock.mjs run "เขียนแผนทดสอบสำหรั
 ## โครงสร้างโปรเจกต์
 
 ```
-server/   orchestrator (กัปตัน), executor (sim/live), llm (Anthropic SDK), metrics, bus, state, index (HTTP+SSE)
+server/   orchestrator (กัปตัน), executor (sim/live), llm (Anthropic SDK), projects (Project Pack), apply (Developer แก้ไฟล์จริง + ด่านอนุมัติ), metrics, bus, state, index (HTTP+SSE)
+tools/    grock.mjs (CLI), tests/ (npm test: unit + e2e โหมด sim)
 public/   index.html, styles.css, app.js (canvas animation + แผงควบคุม)
 docs/     01-grok-architecture.md (Grok ทำงานอย่างไร), 02-multi-agent-design.md (ออกแบบระบบนี้และแนวทางขยาย)
 logs/     events.jsonl (สร้างอัตโนมัติ)

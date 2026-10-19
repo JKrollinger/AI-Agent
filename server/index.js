@@ -191,12 +191,19 @@ async function handleApi(req, res, url) {
     }
     return sendJson(res, 200, out);
   }
+  if (m === "GET" && seg[1] === "tasks" && seg[2] && seg[3] === "patch") {
+    // เนื้อหา patch ฉบับเต็มของงานแก้ไฟล์จริง (อ่านจาก .grock/out ของโปรเจกต์ — localhost เท่านั้นเหมือน API อื่น)
+    return sendJson(res, 200, orch.getTaskPatch(decodeURIComponent(seg[2])));
+  }
   if (m === "POST" && seg[1] === "tasks" && seg[2] && seg[3]) {
     const body = await readBody(req);
     const id = decodeURIComponent(seg[2]);
     if (seg[3] === "handoff") return sendJson(res, 200, { task: orch.handoff(id, body.agentId, body.reason) });
     if (seg[3] === "retry") return sendJson(res, 200, { task: orch.retryTask(id) });
     if (seg[3] === "cancel") return sendJson(res, 200, { task: orch.cancelTask(id) });
+    // ด่านอนุมัติ patch (Developer แก้ไฟล์จริง): apply = git apply --check → git apply ในโปรเจกต์, reject = ไม่แตะไฟล์
+    if (seg[3] === "apply") return sendJson(res, 200, { task: orch.applyPatch(id, { note: body.note }) });
+    if (seg[3] === "reject") return sendJson(res, 200, { task: orch.rejectPatch(id, { reason: body.reason }) });
   }
   if (m === "POST" && seg[1] === "agents" && seg[2] && seg[3]) {
     const id = decodeURIComponent(seg[2]);

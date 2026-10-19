@@ -5,7 +5,8 @@
 import { ROLES, CAPTAIN_MODEL, TOOL_META, estimateCost, toolsFor, toolHintFor } from "./agents.js";
 import { state, workers, captain } from "./state.js";
 import { skillFor } from "./skills.js";
-import { projectSkillFor, effectiveAgent } from "./projects.js";
+import { projectSkillFor, effectiveAgent, writeGrantFor } from "./projects.js";
+import { findClaudeCli, runHeadlessEdit, simulateChanges, writePatch, composeEditOutput, CLI_TOOL_NAME } from "./apply.js";
 import * as llm from "./llm.js";
 
 export const isLive = () => state.mode === "live";
@@ -713,10 +714,20 @@ function simReview(context) {
   };
 }
 
-async function simRun({ agent, task, context, signal, onProgress }) {
+// โหมด sim ของงานที่ "แก้ไฟล์จริง": แสดงเครื่องมือ Claude Code แทน code_execution (ลำดับเหมือน live: อ่านโครงสร้าง → แก้ไฟล์ใน sandbox → รันเทสต์ถ้าอนุญาต)
+function simEditToolPhases(grant) {
+  const bash = grant.tools.find((t) => t.startsWith("Bash("));
+  return [
+    { after: 0, tool: CLI_TOOL_NAME, chance: 1, summary: () => `อ่านโครงสร้างโปรเจกต์ (${grant.write.join(", ")})`, result: () => "อ่านโครงสร้างโปรเจกต์แล้ว" },
+    { after: 1, tool: CLI_TOOL_NAME, chance: 1, summary: () => "แก้ไฟล์ใน sandbox", result: () => "แก้ไฟล์ใน sandbox แล้ว" },
+    { after: 2, tool: CLI_TOOL_NAME, chance: bash ? 1 : 0, summary: () => bash?.slice(5, -1) || "", result: (s) => `รัน ${s} สำเร็จ` },
+  ].filter((t) => t.chance > 0);
+}
+
+async function simRun({ agent, task, context, signal, onProgress, grant = null }) {
   const role = workRole(agent, task);
   const phases = (role === agent.role && SIM_PHASES_BY_JOB[agent.jobId]) || SIM_PHASES[role] || SIM_PHASES.researcher;
-  const toolPhases = simToolPhases(role, context, agent);
+  const toolPhases = grant ? simEditToolPhases(grant) : simToolPhases(role, context, agent);
   // ประกอบ system prompt จริงแม้ในโหมดจำลอง เพื่อให้เห็นขนาดบริบท/ต้นทุนเมื่อมีโปรเจกต์ (และจับบั๊กของการประกอบ prompt ได้โดยไม่เสียเงิน)
   const sys = buildSystem(agent, task, context);
   const ctxChars = sys.chars + (context.project?.placement === "system" ? 0 : context.project?.data?.length || 0) + (context.files || []).reduce((n, f) => n + (f.text?.length || 0), 0);
@@ -760,17 +771,45 @@ async function simRun({ agent, task, context, signal, onProgress }) {
     ...(cacheRead ? { cache_read_input_tokens: cacheRead } : {}),
     ...(toolCalls ? { server_tool_use: toolUsage } : {}),
   };
-  return { output: finalText, usage, model: agent.model, review, toolCalls };
+  if (!grant) return { output: finalText, usage, model: agent.model, review, toolCalls };
+  // งานแก้ไฟล์จริง (sim): สร้าง patch ปลอมที่ apply ได้จริง เพื่อทดสอบด่านอนุมัติโดยไม่เรียก claude
+  if (signal?.aborted) throw abortErr();
+  const changes = simulateChanges({ pack: context.project.pack, grant, task, agent });
+  const patch = changes ? writePatch({ pack: context.project.pack, task, agent, changes, mode: "sim" }) : null;
+  return { output: composeEditOutput({ summary: finalText, patch, changes }), usage, model: agent.model, review, toolCalls, patch };
+}
+
+/**
+ * สิทธิ์แก้ไฟล์จริงของงานชิ้นนี้ (null = ไม่มี → ทำแบบข้อเสนอ): เฉพาะงานตำแหน่ง coder ในโปรเจกต์ที่ permissions.<agentId> ให้สิทธิ์ และคนนั้นไม่ได้ถูกปิดเครื่องมือ
+ */
+export function editGrantFor({ agent, task, context, onProgress }) {
+  if (workRole(agent, task) !== "coder" || !context?.project?.pack) return null;
+  const grant = writeGrantFor(context.project.pack, agent.id);
+  if (!grant) return null;
+  if (agent.toolsEnabled === false) {
+    onProgress?.({ note: `โปรเจกต์ให้สิทธิ์แก้ไฟล์กับ ${agent.name} แต่ถูกปิดเครื่องมือไว้ (⚙ ตั้งค่า AI) → ทำแบบข้อเสนอแทน`, level: "warn" });
+    return null;
+  }
+  return grant;
 }
 
 /**
  * ทำงาน 1 ชิ้น
- * onProgress รับ { phase, progress, text, tool, toolStarted }:
+ * onProgress รับ { phase, progress, text, tool, toolStarted, note }:
  *   tool        = ชื่อเครื่องมือที่กำลังใช้ (null = ไม่ได้ใช้, undefined = ไม่เปลี่ยน)
  *   toolStarted = true เมื่อเริ่มใช้เครื่องมือครั้งใหม่ (orchestrator ใช้นับ task.toolCalls / agent.metrics.toolCalls)
- * @returns {{output:string, usage:object, model:string, review?:object, toolCalls:number}}
+ *   note        = ข้อความลง log/ประวัติงาน (เช่น เหตุผลที่ถอยไปทำแบบข้อเสนอ)
+ * งานของ coder ในโปรเจกต์ที่ให้สิทธิ์แก้ไฟล์ → apply.js (Claude Code headless ใน live / patch จำลองใน sim) → result.patch รออนุมัติ
+ * @returns {{output:string, usage:object, model:string, review?:object, toolCalls:number, patch?:object|null}}
  */
 export async function runTask(args) {
+  const grant = editGrantFor(args);
+  if (grant) {
+    if (!isLive()) return simRun({ ...args, grant });
+    const cli = findClaudeCli();
+    if (cli.bin) return runHeadlessEdit({ ...args, grant, cli, taskBody: taskPrompt(args.task, args.context) });
+    args.onProgress?.({ note: `โปรเจกต์ให้สิทธิ์แก้ไฟล์กับ ${args.agent.name} แต่${cli.error} → ทำแบบข้อเสนอ (ไม่แตะไฟล์) แทน`, level: "warn" });
+  }
   return isLive() ? liveRun(args) : simRun(args);
 }
 
