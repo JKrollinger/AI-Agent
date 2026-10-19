@@ -90,13 +90,13 @@ function handle(ev) {
   const d = ev.data || {};
   switch (ev.type) {
     case "snapshot":
-      S.mode = d.mode; S.settings = d.settings; S.totals = d.totals;
+      S.mode = d.mode; S.settings = d.settings; S.totals = d.totals; S.projects = d.projects || [];
       S.agents = new Map(d.agents.map((a) => [a.id, a]));
       S.tasks = new Map(d.tasks.map((t) => [t.id, t]));
       S.jobs = new Map(d.jobs.map((j) => [j.id, j]));
       S.allowedModels = d.allowedModels || [];
       layout();
-      mark("kpis", "tasks", "metrics", "results", "drawer", "mode", "roster", "strip");
+      mark("kpis", "tasks", "metrics", "results", "drawer", "mode", "roster", "strip", "projects");
       break;
     case "log.history":
       S.logs = (d.events || []).slice().reverse();
@@ -177,6 +177,9 @@ function handle(ev) {
     case "mode.updated":
       S.mode = d.mode; mark("mode");
       break;
+    case "projects.updated":
+      S.projects = d.projects || []; mark("projects");
+      break;
   }
 }
 
@@ -185,6 +188,7 @@ function handle(ev) {
 // ---------------------------------------------------------------------------
 function flush() {
   if (dirty.has("mode")) renderMode();
+  if (dirty.has("projects")) renderProjects();
   if (dirty.has("kpis")) renderKpis();
   if (dirty.has("tasks")) renderTasks();
   if (dirty.has("metrics")) renderMetrics();
@@ -194,6 +198,23 @@ function flush() {
   if (dirty.has("roster")) renderRoster();
   if (dirty.has("strip")) renderStrip();
   dirty.clear();
+}
+
+/** รายการโปรเจกต์ (Project Pack) ในช่องเลือกข้างช่องโจทย์ — จำตัวเลือกล่าสุดไว้ในเบราว์เซอร์ */
+function renderProjects() {
+  const sel = $("#projectSelect"); if (!sel) return;
+  let remembered = "";
+  try { remembered = localStorage.getItem("grock.project") || ""; } catch {}
+  const current = sel.value || remembered;
+  const list = S.projects || [];
+  sel.innerHTML = `<option value="">ไม่ระบุโปรเจกต์</option>` + list.map((p) => `<option value="${esc(p.id)}"${p.ok ? "" : " disabled"}>📁 ${esc(p.name || p.id)}${p.ok ? "" : " (ไม่พบโฟลเดอร์)"}</option>`).join("");
+  if (current && list.some((p) => p.id === current && p.ok)) sel.value = current;
+  sel.classList.toggle("hidden", !list.length);
+}
+function selectedProject() {
+  const v = $("#projectSelect")?.value || "";
+  try { localStorage.setItem("grock.project", v); } catch {}
+  return v || null;
 }
 
 function renderMode() {
@@ -255,7 +276,7 @@ function renderTasks() {
     return `<div class="job">
       <div class="job-head" data-job="${j.id}">
         <div style="flex:1;min-width:0"><div class="goal">${esc(j.goal)}</div>
-          <div class="meta">${done}/${tasks.length} งาน · ${dur} · ${fmtUsd(j.costUsd || tasks.reduce((s, t) => s + (t.usage?.costUsd || 0), 0))}</div></div>
+          <div class="meta">${done}/${tasks.length} งาน · ${dur} · ${fmtUsd(j.costUsd || tasks.reduce((s, t) => s + (t.usage?.costUsd || 0), 0))}${j.project ? ` · <span class="chip proj">📁 ${esc(j.project)}</span>` : ""}</div></div>
         <span class="chip ${j.status}">${STATUS_TH[j.status] || j.status}</span>
         <span style="color:var(--muted)">${collapsed ? "▸" : "▾"}</span>
       </div>
@@ -290,7 +311,7 @@ function renderMetrics() {
           <div class="stat"><div class="v">${m.tasksDone}</div><div class="l">งานเสร็จ</div></div>
           <div class="stat"><div class="v">${m.tasksFailed}</div><div class="l">ล้มเหลว</div></div>
           <div class="stat"><div class="v">${fmtMs(c.avgDurationMs)}</div><div class="l">เวลาเฉลี่ย</div></div>
-          <div class="stat"><div class="v">${fmtK(m.inputTokens)}</div><div class="l">โทเคนเข้า</div></div>
+          <div class="stat"><div class="v">${fmtK(m.inputTokens)}</div><div class="l">โทเคนเข้า${m.cacheReadTokens ? ` · แคช ${pct(m.cacheReadTokens / Math.max(1, m.inputTokens))}` : ""}</div></div>
           <div class="stat"><div class="v">${fmtK(m.outputTokens)}</div><div class="l">โทเคนออก</div></div>
           <div class="stat"><div class="v">${fmtUsd(m.costUsd)}</div><div class="l">ต้นทุน</div></div>
           <div class="stat"><div class="v">${c.avgQuality ?? "—"}</div><div class="l">คุณภาพ (QA)</div></div>
@@ -318,6 +339,7 @@ function renderResults() {
         <div class="head" data-result="${j.id}"><div class="goal">${esc(j.goal)}</div><span class="chip ${j.status}">${STATUS_TH[j.status]}</span></div>
         <div class="meta" style="padding:0 12px 10px;color:var(--muted);font-size:11px">${fmtMs(j.durationMs)} · ${fmtUsd(j.costUsd)} · ${j.taskIds.length} งานย่อย
           <button class="btn small ghost" data-copy="${j.id}" style="margin-left:8px">คัดลอกผลลัพธ์</button></div>
+        ${j.outputDir ? `<div class="outdir">📁 ${esc(j.outputDir)} <button class="btn small ghost" data-copytext="${esc(j.outputDir)}">คัดลอกพาธ</button></div>` : ""}
         ${S.expandedResults.has(j.id) ? `<pre>${esc(j.result || "(ไม่มีผลลัพธ์)")}</pre>` : ""}
       </div>`).join("")
     : `<div class="empty">ยังไม่มีผลงานที่เสร็จ</div>`;
@@ -602,9 +624,10 @@ $("#jobForm").addEventListener("submit", (e) => {
   const goal = input.value.trim();
   if (!goal) return toast("กรุณาพิมพ์โจทย์งานก่อน", "warn");
   input.value = "";
-  act(api("/api/jobs", { goal }), () => toast("📥 ส่งโจทย์ให้กัปตันแล้ว"));
+  const project = selectedProject();
+  act(api("/api/jobs", { goal, project }), (r) => toast(project ? `📥 ส่งโจทย์ให้กัปตันแล้ว (โปรเจกต์ ${project}) — ผลงานจะอยู่ที่ ${r.job?.outputDir || ""}` : "📥 ส่งโจทย์ให้กัปตันแล้ว"));
 });
-$("#demoBtn").addEventListener("click", () => act(api("/api/demo"), (r) => toast(`📥 มอบหมายงานตัวอย่าง: "${trunc(r.job.goal, 50)}"`)));
+$("#demoBtn").addEventListener("click", () => act(api("/api/demo", { project: selectedProject() }), (r) => toast(`📥 มอบหมายงานตัวอย่าง: "${trunc(r.job.goal, 50)}"`)));
 $("#modeBadge").addEventListener("click", () => act(api("/api/mode", { mode: S.mode === "live" ? "sim" : "live" }), () => {}));
 
 let speedTimer;
@@ -627,6 +650,7 @@ document.addEventListener("click", (e) => {
   if (jobHead) { const id = jobHead.dataset.job; S.collapsed.has(id) ? S.collapsed.delete(id) : S.collapsed.add(id); return renderTasks(); }
   const resHead = el.closest("[data-result]");
   if (resHead) { const id = resHead.dataset.result; S.expandedResults.has(id) ? S.expandedResults.delete(id) : S.expandedResults.add(id); return renderResults(); }
+  if (el.dataset.copytext) { navigator.clipboard?.writeText(el.dataset.copytext).then(() => toast("คัดลอกพาธแล้ว", "ok")); return; }
   if (el.dataset.copy) { const j = S.jobs.get(el.dataset.copy); navigator.clipboard?.writeText(j?.result || "").then(() => toast("คัดลอกผลลัพธ์แล้ว", "ok")); return; }
   const rosterRow = el.closest(".roster-row");
   if (rosterRow) return openDrawer("agent", rosterRow.dataset.agent);

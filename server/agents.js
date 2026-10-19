@@ -199,6 +199,7 @@ export function makeAgent(def) {
       handoffsIn: 0,
       handoffsOut: 0,
       toolCalls: 0, // จำนวนครั้งที่ใช้เครื่องมือ (server tools)
+      cacheReadTokens: 0, // โทเคนที่อ่านจาก prompt cache (ดูว่าบริบทโปรเจกต์ถูก cache จริงไหม)
       busyMs: 0,
       totalDurationMs: 0,
       inputTokens: 0,
@@ -210,8 +211,21 @@ export function makeAgent(def) {
 }
 
 /** ประมาณต้นทุนจาก usage ของ API (รวมค่า web search ต่อครั้งจาก usage.server_tool_use) */
-export function estimateCost(model, usage = {}) {
-  const p = PRICING[model] || PRICING["claude-sonnet-5-5"];
+/** ตารางราคาของโมเดล: ตรงตัว → ขึ้นต้นด้วยชื่อที่รู้จัก (id มี suffix) → ตระกูลเดียวกัน (server-side fallback เช่น opus-4-x) → null */
+export function priceFor(model) {
+  const m = String(model || "");
+  if (PRICING[m]) return PRICING[m];
+  const keys = Object.keys(PRICING);
+  const byPrefix = keys.find((k) => m.startsWith(k));
+  if (byPrefix) return PRICING[byPrefix];
+  const family = ["fable", "opus", "sonnet", "haiku"].find((f) => m.includes(f));
+  const byFamily = family && keys.find((k) => k.includes(family));
+  return byFamily ? PRICING[byFamily] : null;
+}
+
+/** ประมาณต้นทุนจาก usage ของ API (รวมค่า web search ต่อครั้งจาก usage.server_tool_use) — โมเดลที่ไม่รู้จักใช้ราคาของ fallbackModel (โมเดลที่ตั้งใจเรียก) ไม่ใช่ Sonnet เงียบ ๆ */
+export function estimateCost(model, usage = {}, fallbackModel = null) {
+  const p = priceFor(model) || priceFor(fallbackModel) || PRICING["claude-sonnet-5-5"];
   const input = usage.input_tokens || 0;
   const output = usage.output_tokens || 0;
   const cacheRead = usage.cache_read_input_tokens || 0;

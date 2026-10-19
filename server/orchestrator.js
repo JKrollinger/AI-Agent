@@ -8,6 +8,7 @@ import { recordUsage, recordDone, recordFailed, recordInterrupted, recordHandoff
 import { ROLES, estimateCost, ALLOWED_MODELS, ALLOWED_EFFORTS, MAX_DUTIES_LENGTH } from "./agents.js";
 import { liveAvailable } from "./llm.js";
 import { saveTeamOverrides } from "./team-store.js";
+import { loadPack, buildProjectContext, effectiveAgent, setJobContext, getJobContext, readProjectFiles, jobOutputDir } from "./projects.js";
 
 const MAX_ATTEMPTS = 3;
 const TERMINAL = new Set(["done", "cancelled"]);
@@ -30,26 +31,93 @@ export class HttpError extends Error {
 // ====================================================================
 // รับโจทย์ใหม่
 // ====================================================================
-export async function submitJob(goal) {
+/** กัปตันรับได้หลายโจทย์พร้อมกัน (หลายโปรเจกต์) → นับจำนวนงานที่ถืออยู่ ไม่ใช่สลับสถานะทีละงาน */
+function captainBusy(cap, label, phase) {
+  cap.activeJobs = (cap.activeJobs || 0) + 1;
+  cap.status = "working";
+  cap.currentLabel = label;
+  cap.phase = phase;
+  emitAgent(cap);
+}
+function captainFree(cap) {
+  cap.activeJobs = Math.max(0, (cap.activeJobs || 1) - 1);
+  if (!cap.activeJobs) {
+    cap.status = "idle";
+    cap.currentLabel = "";
+    cap.phase = "";
+  }
+  emitAgent(cap);
+}
+
+/** จำนวนรอบสูงสุดของงาน (ปรับได้ต่อโปรเจกต์ใน project.json qa.maxAttempts) */
+function maxAttemptsFor(job) {
+  return getJobContext(job?.id)?.pack?.config?.qa?.maxAttempts || MAX_ATTEMPTS;
+}
+
+/** ข้อมูลโปรเจกต์สำหรับ executor: { pack, name, system, data, qa, files } หรือ null */
+function projectFor(jobId, role = "captain") {
+  const jc = getJobContext(jobId);
+  if (!jc) return null;
+  if (!jc.roleData.has(role)) jc.roleData.set(role, buildProjectContext(jc.pack, { role }));
+  const pc = jc.roleData.get(role);
+  if (jc.files?.length && !jc.filesRead) jc.filesRead = readProjectFiles(jc.pack, jc.files);
+  return { pack: jc.pack, name: jc.pack.name, system: pc.system, brief: pc.brief, roleInstructions: pc.roleInstructions, placement: pc.placement, data: pc.data, qa: jc.pack.config.qa, files: jc.filesRead || [] };
+}
+
+/**
+ * รับโจทย์ใหม่ (คืน job ทันที สถานะ planning แล้วกัปตันวางแผนต่อเบื้องหลัง — ติดตามผ่าน SSE หรือ GET /api/jobs/:id)
+ * @param {object} [opts]
+ * @param {string|null} [opts.projectId]  id ของ Project Pack ที่ลงทะเบียนไว้
+ * @param {string[]} [opts.files]         ไฟล์ในโปรเจกต์ที่ให้ทีมอ่านประกอบ (path สัมพัทธ์)
+ */
+export function submitJob(goal, { projectId = null, files = [] } = {}) {
   goal = String(goal || "").trim();
   if (!goal) throw new HttpError(400, "กรุณาระบุโจทย์งาน");
   if (goal.length > 2000) throw new HttpError(400, "โจทย์ยาวเกิน 2000 ตัวอักษร");
+  let pack = null;
+  if (projectId) {
+    try {
+      pack = loadPack(String(projectId));
+    } catch (err) {
+      throw new HttpError(err.status || 400, err.message);
+    }
+  }
 
-  const job = newJob(goal);
+  const job = newJob(goal, { project: pack ? pack.id : null, files: pack ? files : [] });
+  if (pack) {
+    let out;
+    try {
+      out = jobOutputDir(pack, job.id);
+    } catch (err) {
+      state.jobs.delete(job.id); // อย่าทิ้งโจทย์ค้างสถานะ planning ไว้ใน snapshot
+      throw new HttpError(500, `สร้างโฟลเดอร์ผลงานในโปรเจกต์ไม่ได้: ${err.message}`);
+    }
+    job.outputDir = `${pack.rootPosix}/${out.rel}`;
+    setJobContext(job.id, { pack, files, outDir: out.abs, outDirRel: out.rel, tasks: new Map(), roleData: new Map(), filesRead: null, job });
+  }
   emitJob("job.created", job);
-  bus.log(`📥 รับโจทย์ใหม่: "${goal}"`, { jobId: job.id });
+  bus.log(`📥 รับโจทย์ใหม่: "${goal}"${pack ? ` (โปรเจกต์ ${pack.name})` : ""}`, { jobId: job.id });
+  if (pack) {
+    const ctx = projectFor(job.id, "captain");
+    const included = buildProjectContext(pack, { role: "captain" }).files.filter((f) => !f.skippedReason).length;
+    bus.log(`📚 โหลดบริบทโปรเจกต์ "${pack.name}": ${included} ไฟล์, ${(ctx.system.length + ctx.data.length).toLocaleString()} ตัวอักษร → ผลงานจะเขียนที่ ${job.outputDir}`, { jobId: job.id });
+    for (const w of pack.warnings) bus.log(`⚠️ โปรเจกต์ ${pack.name}: ${w}`, { jobId: job.id, level: "warn" });
+  }
+  void planAndStart(job);
+  return job;
+}
 
+async function planAndStart(job) {
+  const goal = job.goal;
   const cap = captain();
-  cap.status = "working";
-  cap.currentLabel = `วางแผน: ${shorten(goal)}`;
-  cap.phase = "กำลังอ่านโจทย์";
-  emitAgent(cap);
+  captainBusy(cap, `วางแผน: ${shorten(goal)}`, "กำลังอ่านโจทย์");
 
   const t0 = now();
   const ac = new AbortController();
   running.set(`job:${job.id}`, ac);
   try {
     const plan = await planJob(job, {
+      project: projectFor(job.id, "captain"),
       signal: ac.signal,
       onPhase: (phase) => {
         cap.phase = phase;
@@ -71,7 +139,7 @@ export async function submitJob(goal) {
     });
     job.taskIds = created.map((t) => t.id);
     job.status = "running";
-    job.planCostUsd = recordUsage(cap, null, plan.usage);
+    job.planCostUsd = recordUsage(cap, null, plan.usage, plan.model || cap.model);
     cap.metrics.tasksDone += 1;
     cap.metrics.busyMs += now() - t0;
     cap.metrics.totalDurationMs += now() - t0;
@@ -87,13 +155,38 @@ export async function submitJob(goal) {
     bus.log(`❌ วางแผนงานไม่สำเร็จ: ${err.message}`, { jobId: job.id, level: "error" });
   } finally {
     running.delete(`job:${job.id}`);
-    cap.status = "idle";
-    cap.currentLabel = "";
-    cap.phase = "";
-    emitAgent(cap);
+    captainFree(cap);
   }
   tick();
   return job;
+}
+
+/** งบต่อโจทย์: project.json budget.maxUsdPerJob (0 = ไม่จำกัดชัดเจน) ถ้าโปรเจกต์ไม่ได้ตั้ง (null) ใช้ env MAX_USD_PER_JOB — คืน 0 = ไม่จำกัด */
+function budgetFor(job) {
+  const fromPack = getJobContext(job?.id)?.pack?.config?.budget?.maxUsdPerJob;
+  const v = fromPack === null || fromPack === undefined ? Number(process.env.MAX_USD_PER_JOB) || 0 : Number(fromPack) || 0;
+  return v > 0 ? v : 0;
+}
+function spentSoFar(job) {
+  return (job.planCostUsd || 0) + job.taskIds.map(getTask).filter(Boolean).reduce((s, t) => s + (t.usage?.costUsd || 0), 0);
+}
+function failJobForBudget(job, spent, max) {
+  for (const t of job.taskIds.map(getTask).filter(Boolean)) {
+    if (t.status === "queued" || t.status === "assigned" || t.status === "running") {
+      if (t.status !== "queued") interrupt(t); // ยกเลิกการเรียก API ที่ค้างอยู่ทันที
+      t.status = "cancelled";
+      t.finishedAt = now();
+      t.phase = "ยกเลิก: เกินงบ";
+      t.assignedTo = null;
+      t.history.push({ t: now(), type: "cancelled", note: `ยกเลิกเพราะโจทย์ใช้เงินเกินงบ ($${spent.toFixed(4)} > $${max.toFixed(2)})` });
+      emitTask("task.updated", t);
+    }
+  }
+  job.status = "failed";
+  job.finishedAt = now();
+  job.costUsd = spent;
+  emitJob("job.failed", job);
+  bus.log(`💸 โจทย์ "${shorten(job.goal, 50)}" ใช้เงินเกินงบ ($${spent.toFixed(4)} > $${max.toFixed(2)}) — หยุดมอบหมายงานที่เหลือ ผลงานที่เสร็จแล้วยังถูกบันทึก`, { jobId: job.id, level: "error" });
 }
 
 // ====================================================================
@@ -101,8 +194,20 @@ export async function submitJob(goal) {
 // ====================================================================
 export function tick() {
   if (!state.settings.autoAssign) return;
+  const checkedJobs = new Set();
   for (const task of state.tasks.values()) {
     if (task.status !== "queued") continue;
+    const job = getJob(task.jobId);
+    if (!job || (job.status !== "running" && job.status !== "planning")) continue; // งานของโจทย์ที่จบ/ล้มเหลวแล้วไม่มอบหมายต่อ
+    if (!checkedJobs.has(job.id)) {
+      checkedJobs.add(job.id);
+      const max = budgetFor(job);
+      if (max > 0) {
+        const spent = spentSoFar(job);
+        if (spent > max) { failJobForBudget(job, spent, max); continue; }
+      }
+    }
+    if (job.status !== "running") continue;
     if (!depsSatisfied(task)) continue;
     const agent = pickAgent(task);
     if (agent) assign(task, agent);
@@ -193,7 +298,8 @@ function buildContext(task) {
       };
     }
   }
-  return { goal: job?.goal || "", inputs, reviewTarget };
+  const project = projectFor(task.jobId, task.role);
+  return { goal: job?.goal || "", inputs, reviewTarget, project, files: project?.files || [] };
 }
 
 async function start(task, agent) {
@@ -211,9 +317,14 @@ async function start(task, agent) {
   emitTask("task.started", task);
 
   const context = buildContext(task);
+  // ค่าเฉพาะโปรเจกต์ (โมเดล/ความลึก/เครื่องมือ/หน้าที่) ใช้กับงานชิ้นนี้ โดยไม่แก้ตัวพนักงานจริง
+  const eff = context.project ? effectiveAgent(agent, context.project.pack) : agent;
+  if (eff.projectOverrides?.length) {
+    task.history.push({ t: now(), type: "override", agentId: agent.id, note: `ใช้ค่าเฉพาะโปรเจกต์: ${eff.projectOverrides.join(", ")}` });
+  }
   try {
     const result = await runTask({
-      agent,
+      agent: eff,
       task,
       context,
       signal: ac.signal,
@@ -270,8 +381,13 @@ function finish(task, agent, result) {
   task.output = result.output || "";
   task.activeTool = null;
   if (result.review) task.review = { ...result.review, reviewerId: agent.id };
-  recordUsage(agent, task, result.usage);
+  recordUsage(agent, task, result.usage, result.model || agent.model);
   recordDone(agent, task);
+  const jobOfTask = getJob(task.jobId);
+  if (jobOfTask && jobOfTask.status === "failed") { // โจทย์ถูกปิดไปแล้ว (เช่น เกินงบ) แต่ชิ้นนี้เสร็จพอดี → อัปเดตต้นทุนรวมและไฟล์ job.json
+    jobOfTask.costUsd = spentSoFar(jobOfTask);
+    emitJob("job.updated", jobOfTask);
+  }
   const toolNote = result.toolCalls ? `, ใช้เครื่องมือ ${result.toolCalls} ครั้ง` : "";
   task.history.push({ t: now(), type: "done", agentId: agent.id, note: `เสร็จใน ${fmtDuration(task.durationMs)}${toolNote}` });
 
@@ -306,11 +422,12 @@ function handleReview(reviewTask, reviewer) {
     bus.log(`🏅 ${reviewer.name} ให้ "${producer.title}" ${r.score}/100 — ผ่าน`, { taskId: producer.id });
     return;
   }
-  if (producer.attempts >= MAX_ATTEMPTS) {
+  const maxA = maxAttemptsFor(getJob(producer.jobId));
+  if (producer.attempts >= maxA) {
     producer.review = { ...r, acceptedWithNotes: true };
     recordQuality(producerAgent, r.score);
     emitTask("task.review", producer, { approved: false, score: r.score, accepted: true });
-    bus.log(`⚠️ "${producer.title}" ไม่ผ่าน QA ครบ ${MAX_ATTEMPTS} รอบ — กัปตันรับงานพร้อมหมายเหตุ`, { taskId: producer.id, level: "warn" });
+    bus.log(`⚠️ "${producer.title}" ไม่ผ่าน QA ครบ ${maxA} รอบ — กัปตันรับงานพร้อมหมายเหตุ`, { taskId: producer.id, level: "warn" });
     return;
   }
 
@@ -349,10 +466,11 @@ function fail(task, agent, err) {
   task.history.push({ t: now(), type: "error", agentId: agent.id, note: msg });
   task.assignedTo = null;
 
-  if (task.attempts < MAX_ATTEMPTS) {
+  const maxA = maxAttemptsFor(getJob(task.jobId));
+  if (task.attempts < maxA) {
     task.status = "queued";
     task.progress = 0;
-    task.phase = `ล้มเหลว จะลองใหม่ (${task.attempts}/${MAX_ATTEMPTS})`;
+    task.phase = `ล้มเหลว จะลองใหม่ (${task.attempts}/${maxA})`;
     emitTask("task.failed", task, { retry: true, error: msg });
     bus.log(`⚠️ ${agent.name} ทำ "${task.title}" ไม่สำเร็จ: ${msg} — กัปตันจะมอบหมายใหม่`, { taskId: task.id, level: "warn" });
   } else {
@@ -381,16 +499,14 @@ async function checkJob(jobId) {
   job.status = "synthesizing";
   emitJob("job.updated", job);
   const cap = captain();
-  cap.status = "working";
-  cap.currentLabel = `รวบรวมผล: ${shorten(job.goal)}`;
-  cap.phase = "กำลังรวบรวมผลงานจากทีม";
-  emitAgent(cap);
+  captainBusy(cap, `รวบรวมผล: ${shorten(job.goal)}`, "กำลังรวบรวมผลงานจากทีม");
 
   const t0 = now();
   const ac = new AbortController();
   running.set(`job:${job.id}`, ac);
   try {
-    const { text, usage } = await synthesizeJob(job, tasks, {
+    const { text, usage, model } = await synthesizeJob(job, tasks, {
+      project: projectFor(job.id, "captain"),
       signal: ac.signal,
       onPhase: (p) => {
         cap.phase = p;
@@ -401,13 +517,13 @@ async function checkJob(jobId) {
     job.status = "done";
     job.finishedAt = now();
     job.durationMs = job.finishedAt - job.createdAt;
-    const synthCost = recordUsage(cap, null, usage);
+    const synthCost = recordUsage(cap, null, usage, model || cap.model);
     cap.metrics.tasksDone += 1;
     cap.metrics.busyMs += now() - t0;
     cap.metrics.totalDurationMs += now() - t0;
     job.costUsd = tasks.reduce((s, t) => s + t.usage.costUsd, 0) + (job.planCostUsd || 0) + synthCost;
     emitJob("job.completed", job);
-    bus.log(`🎉 งาน "${shorten(job.goal, 60)}" เสร็จสมบูรณ์ใน ${fmtDuration(job.durationMs)} ต้นทุนรวม $${job.costUsd.toFixed(4)}`, { jobId: job.id });
+    bus.log(`🎉 งาน "${shorten(job.goal, 60)}" เสร็จสมบูรณ์ใน ${fmtDuration(job.durationMs)} ต้นทุนรวม $${job.costUsd.toFixed(4)}${job.outputDir ? ` → ผลงานที่ ${job.outputDir}` : ""}`, { jobId: job.id });
   } catch (err) {
     if (ac.signal.aborted) return;
     job.status = "failed";
@@ -416,11 +532,15 @@ async function checkJob(jobId) {
     bus.log(`❌ รวบรวมผลงานไม่สำเร็จ: ${err.message}`, { jobId: job.id, level: "error" });
   } finally {
     running.delete(`job:${job.id}`);
-    cap.status = "idle";
-    cap.currentLabel = "";
-    cap.phase = "";
-    emitAgent(cap);
+    captainFree(cap);
   }
+}
+
+/** รายละเอียดโจทย์ 1 รายการสำหรับ API (job + งานย่อย) */
+export function getJobDetail(jobId) {
+  const job = getJob(jobId);
+  if (!job) throw new HttpError(404, "ไม่พบโจทย์");
+  return { job, tasks: job.taskIds.map(getTask).filter(Boolean) };
 }
 
 // ====================================================================
@@ -469,7 +589,8 @@ export function handoff(taskId, toAgentId, reason = "") {
   task.progress = 0;
   task.assignedTo = null;
   task.phase = "รอรับงานต่อ";
-  if (task.attempts >= MAX_ATTEMPTS) task.attempts = MAX_ATTEMPTS - 1;
+  const maxA = maxAttemptsFor(getJob(task.jobId));
+  if (task.attempts >= maxA) task.attempts = maxA - 1;
   if (reason) task.feedback = [task.feedback, `หมายเหตุจากผู้ควบคุม: ${reason}`].filter(Boolean).join("\n");
   task.history.push({ t: now(), type: "handoff", from: fromId, to: to.id, note: reason || "ส่งต่องานโดยผู้ควบคุม" });
   recordHandoff(from, to);
@@ -485,6 +606,10 @@ export function retryTask(taskId) {
   if (!["failed", "cancelled", "done"].includes(task.status)) throw new HttpError(409, "งานนี้ยังไม่จบ ใช้ 'ส่งต่อ' แทน");
   const job = getJob(task.jobId);
   if (job && job.status === "failed") {
+    const max = budgetFor(job);
+    if (max > 0 && spentSoFar(job) > max) {
+      throw new HttpError(409, `โจทย์นี้ใช้เงินเกินงบแล้ว ($${spentSoFar(job).toFixed(4)} > $${max.toFixed(2)}) — เพิ่ม budget.maxUsdPerJob ใน .grock/project.json แล้วส่งโจทย์ใหม่`);
+    }
     job.status = "running";
     job.finishedAt = null;
     emitJob("job.updated", job);

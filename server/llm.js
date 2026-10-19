@@ -113,7 +113,7 @@ function summarizeResult(block) {
 }
 
 /** รวม usage จากหลาย request (กรณีต่อ turn หลัง pause_turn) */
-function mergeUsage(acc, u) {
+export function mergeUsage(acc, u) {
   if (!u) return acc;
   const out = { ...(acc || {}) };
   for (const k of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
@@ -129,7 +129,42 @@ function mergeUsage(acc, u) {
 }
 
 /**
+ * สร้าง system prompt แบบหลายบล็อก (ใช้ prompt cache): บล็อกสุดท้ายได้ cache_control ยกเว้นตั้ง PROMPT_CACHE=0
+ * @param {Array<string|null|undefined>} parts  ข้อความแต่ละบล็อก (ว่าง/null ถูกตัดทิ้ง)
+ * @returns {Array<{type:"text", text:string, cache_control?:object}>|string}
+ */
+const cacheControl = (ttl) => ({ type: "ephemeral", ...(ttl === "1h" ? { ttl: "1h" } : {}) }); // 1h ใช้ได้โดยไม่ต้องมี beta header (เขียนแคชแพงกว่า 5m)
+export function systemBlocks(parts, { ttl = "5m" } = {}) {
+  // part เป็น string (ไม่ทำเครื่องหมาย) หรือ { text, cache: true } (ขอ breakpoint ที่บล็อกนี้) — ถ้าไม่มีใครขอเลย ใช้บล็อกสุดท้าย
+  const items = (parts || [])
+    .map((p) => (p && typeof p === "object" ? { text: String(p.text || "").trim(), cache: Boolean(p.cache) } : { text: typeof p === "string" ? p.trim() : "", cache: false }))
+    .filter((p) => p.text);
+  if (!items.length) return "";
+  const blocks = items.map((p) => ({ type: "text", text: p.text }));
+  if (process.env.PROMPT_CACHE !== "0") {
+    const marked = items.map((p, i) => (p.cache ? i : -1)).filter((i) => i >= 0);
+    for (const i of marked.length ? marked.slice(-3) : [blocks.length - 1]) blocks[i].cache_control = cacheControl(ttl); // ไม่เกิน 3 ใน system (+1 ใน user) = ลิมิต 4 ของ API
+  }
+  return blocks;
+}
+
+/** บล็อกข้อมูลอ้างอิงฝั่ง user (เช่น <project_files>) ที่ให้ cache ได้ */
+export function cachedTextBlock(text, { ttl = "5m" } = {}) {
+  const block = { type: "text", text: String(text) };
+  if (process.env.PROMPT_CACHE !== "0") block.cache_control = cacheControl(ttl);
+  return block;
+}
+
+/** นับโทเคนจริงของคำขอ (ฟรี) — ใช้ดูว่าบริบทโปรเจกต์กินเท่าไร */
+export async function countTokens({ model, system, messages, tools }) {
+  const params = { model, messages, ...(system ? { system } : {}), ...(tools?.length ? { tools } : {}) };
+  const r = await getClient().messages.countTokens(params);
+  return r.input_tokens;
+}
+
+/**
  * เรียกโมเดลแบบ streaming (รองรับ server tools และต่อ turn อัตโนมัติเมื่อ pause_turn)
+ * system รับได้ทั้ง string และ array ของ text block (จาก systemBlocks) ; prompt รับได้ทั้ง string และ array ของ content block
  * @param {object} opts
  * @param {string} opts.model
  * @param {string} opts.system

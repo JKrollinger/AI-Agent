@@ -6,7 +6,9 @@
   "private": true,
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
-    "dev": "node --watch --env-file-if-exists=.env server/index.js"
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "grock": "node tools/grock.mjs",
+    "smoke:live": "node --env-file-if-exists=.env tools/smoke-live.mjs"
   },
   "engines": {
     "node": ">=22.9"

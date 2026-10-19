@@ -335,3 +335,9 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
   .drawer { right: 0; top: 0; width: min(440px, 100vw); max-width: 100vw; }
   body { overflow: auto; }
 }
+
+/* ---------- Project Pack ---------- */
+.proj-select { padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); max-width: 190px; }
+.proj-select:focus { outline: none; border-color: var(--accent); }
+.chip.proj { color: var(--accent); background: rgba(245, 185, 66, 0.12); }
+.outdir { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); padding: 0 12px 10px; word-break: break-all; }

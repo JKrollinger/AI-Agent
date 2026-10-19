@@ -1,6 +1,7 @@
 // state.js — สถานะกลางของระบบ (in-memory) + snapshot สำหรับ dashboard
 import { DEFAULT_TEAM, makeAgent, ALLOWED_MODELS, ALLOWED_EFFORTS } from "./agents.js";
 import { loadTeamOverrides, applyTeamOverrides } from "./team-store.js";
+import { listProjects } from "./projects.js";
 
 let counter = 0;
 export const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${(++counter).toString(36)}`;
@@ -60,7 +61,7 @@ export function createTask({ jobId, seq, title, description, role, dependsOn = [
     startedAt: null,
     finishedAt: null,
     durationMs: 0,
-    usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 },
     toolCalls: 0, // จำนวนครั้งที่ใช้เครื่องมือ (server tools) รวมทุกรอบ
     activeTool: null, // เครื่องมือที่กำลังใช้อยู่ตอนนี้ เช่น web_search (null = ไม่ได้ใช้)
     history: [{ t: Date.now(), type: "created", note: "สร้างงานโดยกัปตัน" }],
@@ -69,16 +70,20 @@ export function createTask({ jobId, seq, title, description, role, dependsOn = [
   return task;
 }
 
-export function createJob(goal) {
+export function createJob(goal, { project = null, files = [] } = {}) {
   const job = {
     id: uid("job"),
     goal,
+    project, // id ของโปรเจกต์ (Project Pack) ที่งานนี้ทำให้ หรือ null
+    files, // ไฟล์ในโปรเจกต์ที่ผู้สั่งงานแนบมาให้ทีมอ่าน (path สัมพัทธ์)
+    outputDir: null, // โฟลเดอร์ผลงานในโปรเจกต์ (เมื่อมี project)
     status: "planning", // planning | running | synthesizing | done | failed
     createdAt: Date.now(),
     finishedAt: null,
     taskIds: [],
     result: "",
     costUsd: 0,
+    planCostUsd: 0,
     durationMs: 0,
   };
   state.jobs.set(job.id, job);
@@ -129,6 +134,8 @@ export function snapshot() {
     mode: state.mode,
     startedAt: state.startedAt,
     settings: state.settings,
+    allowedModels: ALLOWED_MODELS,
+    projects: listProjects(),
     agents,
     tasks,
     jobs,

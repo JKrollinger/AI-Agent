@@ -1,18 +1,32 @@
 // metrics.js — บันทึกตัวชี้วัดการทำงานของพนักงาน AI แต่ละคน
 // ตัวชี้วัดหลัก: งานเสร็จ/ล้มเหลว, เวลาเฉลี่ยต่องาน, อัตราใช้งาน (utilization),
 // โทเคน/ต้นทุน, จำนวนครั้งที่ส่งต่องาน, จำนวนครั้งที่ใช้เครื่องมือ (server tools) และคะแนนคุณภาพจาก QA
-import { estimateCost } from "./agents.js";
+import { estimateCost, priceFor } from "./agents.js";
 
-export function recordUsage(agent, task, usage = {}) {
-  const inTok = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+const warnedModels = new Set();
+
+/**
+ * บันทึก usage ของการเรียก API 1 ครั้ง
+ * @param {string} [model] โมเดลที่ตอบจริง (อาจต่างจาก agent.model เมื่อโปรเจกต์ override หรือ server-side fallback เปลี่ยนโมเดล) → คิดราคาตามนั้น
+ */
+export function recordUsage(agent, task, usage = {}, model = agent.model) {
+  const cacheRead = usage.cache_read_input_tokens || 0;
+  const inTok = (usage.input_tokens || 0) + cacheRead + (usage.cache_creation_input_tokens || 0);
   const outTok = usage.output_tokens || 0;
-  const cost = estimateCost(agent.model, usage); // รวมค่า web search ต่อครั้งแล้ว (ถ้ามี usage.server_tool_use)
+  const used = model || agent.model;
+  if (!priceFor(used) && !warnedModels.has(used)) { // โมเดลที่ API ตอบกลับไม่อยู่ในตารางราคา → คิดตามโมเดลที่ตั้งใจเรียก และเตือนครั้งเดียว
+    warnedModels.add(used);
+    console.warn(`[metrics] ไม่รู้ราคาของโมเดล "${used}" → คิดตามราคาของ "${agent.model}" (เพิ่มใน PRICING ของ server/agents.js)`);
+  }
+  const cost = estimateCost(used, usage, agent.model); // รวมค่า web search ต่อครั้งแล้ว (ถ้ามี usage.server_tool_use)
   agent.metrics.inputTokens += inTok;
   agent.metrics.outputTokens += outTok;
+  agent.metrics.cacheReadTokens = (agent.metrics.cacheReadTokens || 0) + cacheRead;
   agent.metrics.costUsd += cost;
   if (task) {
     task.usage.inputTokens += inTok;
     task.usage.outputTokens += outTok;
+    task.usage.cacheReadTokens = (task.usage.cacheReadTokens || 0) + cacheRead;
     task.usage.costUsd += cost;
   }
   return cost;

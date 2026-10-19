@@ -85,6 +85,22 @@ copy .env.example .env
 แล้วรีเฟรชหน้าเว็บ ระบบจะใช้ภาพนั้นแทนทันที (ทำพื้นหลังสีทึบให้โปร่งใสให้เอง) รายละเอียดชื่อไฟล์และ `manifest.json` อยู่ใน [public/sprites/png/README.md](public/sprites/png/README.md)
 ภาพจากตัวจำลองตัวละครของเกมเป็นลิขสิทธิ์ของผู้พัฒนาเกม ใช้ได้เฉพาะต้นแบบภายในเท่านั้น
 
+## ใช้งานกับโปรเจกต์อื่น (Project Pack)
+
+ให้ทีม AI ทำงานให้โปรเจกต์ของคุณโดยอ่านเอกสารของโปรเจกต์นั้น (README/CLAUDE.md/docs) และเขียนผลงานกลับเข้าโฟลเดอร์โปรเจกต์:
+
+```bash
+node tools/grock.mjs init "C:\Projects\MyShop" --id myshop
+```
+
+แก้ `C:\Projects\MyShop\.grock\brief.md` ให้ตรงกับโปรเจกต์ แล้วสั่งงาน (จากโฟลเดอร์ไหนก็ได้ หรือจาก Claude Code ที่เปิดอยู่ในโปรเจกต์นั้น):
+
+```bash
+node tools/grock.mjs run "เขียนแผนทดสอบสำหรับโมดูลชำระเงิน" --project myshop --wait
+```
+
+ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md)
+
 ## REST API (ใช้ต่อกับระบบอื่นได้)
 
 | Method | Path | ใช้ทำอะไร |
@@ -93,12 +109,16 @@ copy .env.example .env
 | GET | `/api/events` | SSE stream เหตุการณ์สด |
 | GET | `/api/logs?limit=200` | บันทึกย้อนหลัง |
 | GET | `/api/health` | สถานะเซิร์ฟเวอร์/โหมด |
-| POST | `/api/jobs` `{goal}` | มอบหมายโจทย์ใหม่ |
+| POST | `/api/jobs` `{goal, project?, files?}` | มอบหมายโจทย์ใหม่ (ตอบ 202 ทันที กัปตันวางแผนต่อเบื้องหลัง; `project` = id ของ Project Pack) |
 | POST | `/api/demo` | มอบหมายโจทย์ตัวอย่าง |
 | POST | `/api/tasks/:id/handoff` `{agentId, reason}` | ส่งต่องาน |
 | POST | `/api/tasks/:id/retry` · `/cancel` | ทำใหม่ / ยกเลิก |
 | POST | `/api/agents/:id/pause` · `/resume` | หยุด / ให้กลับมาทำงาน |
 | POST | `/api/agents/:id/config` `{duties, model, effort, toolsEnabled}` | ตั้งค่าต่อคน (หน้าที่/โมเดล/ความลึก/เครื่องมือ) บันทึกลง `data/team.json` |
+| GET | `/api/jobs/:id` | รายละเอียดโจทย์ + งานย่อย (สคริปต์ภายนอกใช้ติดตามผล) |
+| GET/POST | `/api/projects` | รายชื่อ / ลงทะเบียนโปรเจกต์ (Project Pack) `{id, path}` |
+| GET | `/api/projects/:id/context?role=coder&tokens=1` | ดูบริบทที่เอเจนต์จะเห็น (ใช้ได้ในโหมด sim, `tokens=1` นับโทเคนจริงเมื่อมี key) |
+| POST | `/api/projects/reload` | โหลด .grock/ ของทุกโปรเจกต์ใหม่ |
 | POST | `/api/settings` `{speed, autoAssign}` | ความเร็วจำลอง / เปิด-ปิดการมอบหมายอัตโนมัติ |
 | POST | `/api/mode` `{mode}` | สลับ `sim` / `live` |
 
@@ -115,3 +135,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 
 - [docs/01-grok-architecture.md](docs/01-grok-architecture.md) — Grok 4 Heavy, Grok 4.20 (4 agents), Agent Tools API, Grok Build, Macrohard และสิ่งที่เรานำมาใช้
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
+- [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)

@@ -1,0 +1,18 @@
+{
+  "name": "",
+  "context": {
+    "always": ["CLAUDE.md", "AGENTS.md", "README.md"],
+    "docsIndex": ["docs/*.md", "docs/**/*.md"],
+    "maxChars": 24000,
+    "placement": "user",
+    "maxCharsPerFile": 8000,
+    "tree": { "depth": 3, "maxEntries": 150, "ignore": [] }
+  },
+  "plan": { "roles": [], "maxTasks": 8 },
+  "roles": {},
+  "agents": {},
+  "qa": { "maxAttempts": 3, "passScore": 70 },
+  "budget": { "maxUsdPerJob": 0 },
+  "output": { "dir": ".grock/out" },
+  "cache": { "ttl": "5m" }
+}

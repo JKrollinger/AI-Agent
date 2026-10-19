@@ -7,12 +7,26 @@ import { fileURLToPath } from "node:url";
 import { bus } from "./bus.js";
 import { state, snapshot } from "./state.js";
 import * as orch from "./orchestrator.js";
-import { liveAvailable } from "./llm.js";
+import { liveAvailable, countTokens } from "./llm.js";
+import { listProjects, registerProject, loadPack, buildProjectContext, reloadPacks, attachWriter } from "./projects.js";
+import { WORKER_MODEL } from "./agents.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, "..", "public");
 const PORT = Number(process.env.PORT || 3789);
 const HOST = process.env.HOST || "127.0.0.1";
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+// กัน DNS-rebinding/CSRF: endpoint ที่แตะดิสก์ (ลงทะเบียนโปรเจกต์/สั่งงาน) รับเฉพาะคำขอจากหน้าเว็บบนเครื่องนี้และต้องเป็น JSON
+function requestAllowed(req) {
+  if (LOOPBACK.has(HOST)) { // ทุก method (GET ก็อ่านไฟล์โปรเจกต์ได้ จึงต้องกัน DNS rebinding ด้วย)
+    const host = String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+    if (!LOOPBACK.has(host)) return { status: 403, error: "Host ไม่ถูกต้อง (รับเฉพาะ localhost)" };
+  }
+  if (req.method !== "POST") return null;
+  const ct = String(req.headers["content-type"] || "").toLowerCase();
+  if (!ct.startsWith("application/json")) return { status: 415, error: "ต้องส่ง Content-Type: application/json" };
+  return null;
+}
 
 // เลือกโหมดเริ่มต้น: MODE=live|sim|auto (auto = live ถ้ามี key, ไม่งั้น sim)
 const MODE = (process.env.MODE || "auto").toLowerCase();
@@ -119,13 +133,63 @@ async function handleApi(req, res, url) {
 
   if (m === "POST" && pathname === "/api/jobs") {
     const body = await readBody(req);
-    const job = await orch.submitJob(body.goal);
-    return sendJson(res, 201, { job });
+    const files = Array.isArray(body.files) ? body.files.filter((f) => typeof f === "string" && f.trim() && f.length <= 260).slice(0, 10) : [];
+    const projectId = typeof body.project === "string" && body.project.trim() ? body.project.trim() : null;
+    const job = orch.submitJob(body.goal, { projectId, files });
+    return sendJson(res, 202, { job }); // 202 = รับแล้ว กัปตันกำลังวางแผน (ติดตามทาง SSE หรือ GET /api/jobs/:id)
   }
   if (m === "POST" && pathname === "/api/demo") {
+    const body = await readBody(req);
     const goal = DEMO_GOALS[demoIndex++ % DEMO_GOALS.length];
-    const job = await orch.submitJob(goal);
-    return sendJson(res, 201, { job });
+    const projectId = typeof body.project === "string" && body.project.trim() ? body.project.trim() : null;
+    const job = orch.submitJob(goal, { projectId });
+    return sendJson(res, 202, { job });
+  }
+  if (m === "GET" && seg[1] === "jobs" && seg[2]) {
+    return sendJson(res, 200, orch.getJobDetail(decodeURIComponent(seg[2])));
+  }
+  if (m === "GET" && pathname === "/api/projects") return sendJson(res, 200, { projects: listProjects() });
+  if (m === "POST" && pathname === "/api/projects") {
+    const body = await readBody(req);
+    let entry;
+    try {
+      entry = registerProject(body.id, body.path, { name: body.name });
+    } catch (err) {
+      throw new orch.HttpError(400, err.message);
+    }
+    bus.publish("projects.updated", { projects: listProjects() });
+    bus.log(`📁 ลงทะเบียนโปรเจกต์ "${entry.name || entry.id}" (${entry.path})`);
+    return sendJson(res, 201, { project: entry, projects: listProjects() });
+  }
+  if (m === "POST" && pathname === "/api/projects/reload") {
+    reloadPacks();
+    bus.publish("projects.updated", { projects: listProjects() });
+    return sendJson(res, 200, { ok: true, projects: listProjects() });
+  }
+  if (m === "GET" && seg[1] === "projects" && seg[2] && seg[3] === "context") {
+    const id = decodeURIComponent(seg[2]);
+    const role = url.searchParams.get("role") || "captain";
+    let pack;
+    try {
+      pack = loadPack(id, { force: url.searchParams.get("fresh") === "1" });
+    } catch (err) {
+      throw new orch.HttpError(err.status || 400, err.message);
+    }
+    const ctx = buildProjectContext(pack, { role });
+    const out = {
+      id: pack.id, name: pack.name, root: pack.rootPosix, role,
+      systemChars: ctx.systemChars, dataChars: ctx.dataChars, chars: ctx.chars, estTokens: Math.ceil(ctx.chars / 3),
+      files: ctx.files, docsIndex: pack.docsIndex.length, tree: pack.tree.length, warnings: pack.warnings, config: pack.config,
+      system: ctx.system, data: ctx.data, inputTokens: null,
+    };
+    if (url.searchParams.get("tokens") === "1" && liveAvailable()) {
+      try {
+        out.inputTokens = await countTokens({ model: WORKER_MODEL, system: [{ type: "text", text: ctx.system }], messages: [{ role: "user", content: ctx.data }] });
+      } catch (err) {
+        out.tokensError = err.message;
+      }
+    }
+    return sendJson(res, 200, out);
   }
   if (m === "POST" && seg[1] === "tasks" && seg[2] && seg[3]) {
     const body = await readBody(req);
@@ -154,10 +218,17 @@ async function handleApi(req, res, url) {
   return sendJson(res, 404, { error: "ไม่พบ endpoint" });
 }
 
+// เขียนผลงานกลับเข้าโปรเจกต์ (เมื่อโจทย์ผูกกับ Project Pack) — ทำงานทั้งโหมด sim และ live
+attachWriter(bus, { agentNameOf: (id) => state.agents.get(id)?.name || "" });
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
-    if (url.pathname.startsWith("/api/")) return await handleApi(req, res, url);
+    if (url.pathname.startsWith("/api/")) {
+      const denied = requestAllowed(req);
+      if (denied) return sendJson(res, denied.status, { error: denied.error });
+      return await handleApi(req, res, url);
+    }
     if (req.method !== "GET") return sendJson(res, 405, { error: "method not allowed" });
     return serveStatic(req, res, url.pathname);
   } catch (err) {

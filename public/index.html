@@ -25,6 +25,7 @@
 
     <form id="jobForm" class="jobform" autocomplete="off">
       <input id="goalInput" type="text" maxlength="2000" placeholder="พิมพ์โจทย์ที่ต้องการมอบหมายให้ทีม AI เช่น วางแผนนำ AI มาใช้ในฝ่ายบริการลูกค้าภายใน 90 วัน" />
+      <select id="projectSelect" class="proj-select" title="โปรเจกต์ที่จะให้ทีม AI ทำงานให้ (ลงทะเบียนด้วย tools/grock.mjs init)"><option value="">ไม่ระบุโปรเจกต์</option></select>
       <button type="submit" class="btn primary">มอบหมายงาน</button>
       <button type="button" id="demoBtn" class="btn ghost">ลองงานตัวอย่าง</button>
       <button type="button" id="settingsBtn" class="btn ghost" title="ตั้งค่าโมเดล/เครื่องมือต่อคน">⚙ ตั้งค่า AI</button>
