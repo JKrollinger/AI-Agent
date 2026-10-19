@@ -40,17 +40,23 @@ window.OFFICE3D_CONFIG = {
   desks: [[-10, -4.7, 1], [-10, -5.5, -1], [-6, -4.7, 1], [-6, -5.5, -1], [-10, 4.7, -1], [-10, 5.5, 1], [-6, 4.7, -1]],
 
   // Live mode: chance of a short break each time an idle agent re-thinks (every 15–30 s).
+  // Breaks happen only when the person has no task AND (idleBreaksOnlyWhenTeamIdle) no job is planning/running/synthesizing —
+  // never while working. Set all to 0 to keep everyone at their desk.
   idleBreaks: { coffee: 0.12, lounge: 0.06, phone: 0.05, printer: 0.04 },
+  idleBreaksOnlyWhenTeamIdle: true,
 
-  // What the scene does on server events (bridge.js). Set an entry to false to turn it off.
+  // What the scene does on server events (bridge.js). Set an entry to false to turn it off. Full table: docs/09-office3d.md §2
   reactions: {
-    assignWalk: true,     // task.assigned  → assignee walks to whoever assigned it, then back to work
-    handInWalk: true,     // task.completed → worker walks to the captain to hand in
-    handoffWalk: true,    // task.handoff   → receiver walks to the sender
-    planningMeeting: true // job.created    → captain plans in the meeting room until job.planned
+    assignWalk: true,      // task.assigned  → assignee walks to whoever assigned it (captain, or the sender of a handoff), then back to work
+    handInWalk: true,      // task.completed → worker walks to the captain to hand in
+    planningMeeting: true, // job.created    → captain plans in the meeting room until job.planned / job.failed
+    failAlert: true,       // task.failed / cancelled / job.failed → red ring + bubble on the person affected
+    cheerOnJobDone: true,  // job.completed  → whole team celebrates for a moment
+    screens: true          // desk monitors show the live stream / tool / % of the person sitting there
   },
 
-  visitor: { enabled: true, name: "แขก", role: "ผู้มาติดต่อจากบริษัทลูกค้า",
+  // A random walk-in guest is not a real event, so it is off in live mode by default (turn on for the ?demo=1 showcase).
+  visitor: { enabled: false, name: "แขก", role: "ผู้มาติดต่อจากบริษัทลูกค้า",
     look: { skin: 0xd9a47c, shirt: 0xdfe7f0, jacket: 0x3c4a5e, pants: 0x3c4a5e, hair: 0x2a1f18, style: 2, iris: 0x3b2618, shoe: 0x1b1b1d } },
 
   // When embedded in an <iframe>: only accept postMessage commands from these origins ([] = the page's own origin only, i.e. the dashboard).

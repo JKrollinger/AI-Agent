@@ -796,7 +796,8 @@ function makeWorker(i,seat){
   blob(0,0,0.7,0.7,true,g,0.015,0.8);
   const w={g,pelvis,spine,neckJ,head,uaL,faL,haL,uaR,faR,haR,thL,knL,ftL,thR,knR,ftR,eyes,cup,phone,ring,seat,
     cups:0,meets:0,name:NAMES[i],role:ROLES[i],agentId:TEAM[i].id,jobId:TEAM[i].jobId,queue:[],pin:null,
-    live:{status:'idle',task:'',progress:0,phase:'',tool:null,stats:null},cur:null,blinkT:1+Math.random()*3,blink:0,
+    live:{status:'idle',task:'',progress:0,phase:'',tool:null,stats:null,attempts:0,toolCalls:0},cur:null,blinkT:1+Math.random()*3,blink:0,
+    alertT:0,cheerT:0, // set by Office3D.alert()/cheer() on real failures / job completion (bridge.js)
     pos:new THREE.Vector3(seat.x,0,seat.z), heading:seat.h, face:seat.h, path:[], state:'work',
     timer:3+Math.random()*10, timerTotal:13, phase:Math.random()*6, speed:1.2+Math.random()*0.25, spot:null, after:null, id:i};
   g.position.copy(w.pos); workers.push(w);
@@ -806,6 +807,7 @@ makeWorker(TEAM.length-1,{x:13.4,z:1.35,h:-Math.PI/2});
 const visitor=workers.pop(); visitor.npc=true; visitor.ring.visible=false; visitor.g.visible=false;
 const pickables=[];
 [...workers,visitor].forEach(w=>w.g.traverse(o=>{ if(o.isMesh && o.geometry!==PG.ring){ o.userData.w=w; pickables.push(o); } }));
+workers.forEach(w=>{ const m=w.seat&&w.seat.monitor; if(m){ m.userData.w=w; m.userData.screen=true; pickables.push(m); } }); // tap a desk monitor → 'screen' event
 const selRing=new THREE.Mesh(new THREE.RingGeometry(0.42,0.5,40), new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.95, depthWrite:false}));
 selRing.rotation.x=-Math.PI/2; selRing.visible=false; scene.add(selRing);
 let selected=null;
@@ -817,6 +819,7 @@ renderer.domElement.addEventListener('pointerup',e=>{
   ndc.set((e.clientX-r.left)/r.width*2-1, -(e.clientY-r.top)/r.height*2+1);
   ray.setFromCamera(ndc,camera);
   const hit=ray.intersectObjects(pickables,false)[0];
+  if(hit && hit.object.userData.screen){ const w=hit.object.userData.w; emit('screen',{agentId:w.agentId,name:w.name}); return; } // monitor → work-screen popup
   select(hit? hit.object.userData.w : null);
 });
 const infoEl=document.getElementById('info');
@@ -850,7 +853,7 @@ function updateTags(t){
       const taskTxt = working && L.task ? L.task : '';
       if(taskTxt!==o.lastTask){ o.task.textContent=taskTxt; o.task.hidden=!taskTxt; o.lastTask=taskTxt; }
       let st, p, col;
-      if(working){ const tool=L.tool&&TOOL_TH[L.tool]; st=(tool||L.phase||'กำลังทำงาน')+' '+Math.round((L.progress||0)*100)+'%'; p=L.progress||0; col='#3fd1a8'; }
+      if(working){ const tool=L.tool&&TOOL_TH[L.tool]; st=(tool||L.phase||'กำลังทำงาน')+' '+Math.round((L.progress||0)*100)+'%'+(L.attempts>1?` · รอบ ${L.attempts}`:''); p=L.progress||0; col='#3fd1a8'; }
       else if(L.status==='paused'){ st='หยุดพัก'; p=1; col='#8b94a3'; }
       else { st= w.state==='walk' ? (DEST_TH[w.after&&w.after.state]||'กำลังเดิน') : (w.state==='visit'?'คุยงาน':'ว่าง'); p=1; col='#3fd1a8'; }
       o.fill.style.width=(p*100).toFixed(0)+'%'; o.fill.style.background=col;
@@ -876,6 +879,9 @@ const MODEL_FILES={}; TEAM.forEach(t=>{ if(t.model&&t.model.file) MODEL_FILES[t.
 // each scene state lists the clips to try, in order of preference; a variant is picked at random when there are several
 const CLIP_FOR={
   work:['work'], walk:['walk'],
+  // live mode: the seated work pose follows the real tool/phase (bridge.js → setAgent): typing · reading the screen · fast typing while code runs · thinking
+  'work:type':['work'], 'work:read':['work'], 'work:code':['work'], 'work:think':['meet2','meet','lounge','sit','work'],
+  cheer:['cheer'], sad:['sad'],   // optional Mixamo clips (Cheering / Defeated) — without them: a small hop / red ring + bubble
   meet:['meet','meet2','sit','lounge','work'],
   rest:['meet','meet2','lounge','sit','work'],
   lounge:['lounge','sitdrink','meet2','sit','meet','work'],
@@ -884,6 +890,14 @@ const CLIP_FOR={
 };
 // clips that sit down once and then hold the final pose
 const ONCE=new Set(['sit','sitdrink']);
+// which seated work pose fits the real activity reported by the server (tool first, then the phase text, then a slow typing/thinking cycle)
+const TOOL_POSE={web_search:'read',web_fetch:'read',code_execution:'code',bash_code_execution:'code',text_editor_code_execution:'code',claude_code:'code'};
+function workVariant(w,t){
+  const L=w.live;
+  if(L.tool && TOOL_POSE[L.tool]) return TOOL_POSE[L.tool];
+  if(/กำลังคิด|กำลังอ่าน|กำลังตรวจ/.test(L.phase||'')) return 'think';
+  return ((t + (w.id||0)*7) % 29) < 25 ? 'type' : 'think';   // long typing stretches with a short pause to think (deterministic, not random)
+}
 const CHAIR_HIPS=0.52, SOFA_HIPS=0.56;
 const hipsY=(clip,atEnd)=>{ const tr=clip&&clip.tracks.find(t=>/Hips\.position$/.test(t.name)); return tr?tr.values[atEnd?tr.values.length-2:1]:null; };
 function attachProp(model,scale,re,mesh,pos){
@@ -909,12 +923,16 @@ function useModel(w,gltf,cfg){
 }
 function poseModel(w,t,dt,sdt){
   const s=w.state;
-  w.ring.material.color.set(STATE_COL[s]||STATE_COL.walk);
-  if(s!==w.clipState){
-    const opts=(CLIP_FOR[s]||['idle']).filter(n=>w.actions[n]);
-    const pref=(CLIP_FOR[s]||[]).slice(0,2).filter(n=>w.actions[n]);   // vary between the two preferred clips
+  if(w.alertT>0) w.alertT-=sdt; if(w.cheerT>0) w.cheerT-=sdt;
+  w.ring.material.color.set(w.alertT>0 ? 0xff5f6d : (STATE_COL[s]||STATE_COL.walk));
+  const v = (s==='work' && MODE==='live' && w.live.status==='working') ? workVariant(w,t) : null;
+  const key = (w.cheerT>0 && w.actions.cheer) ? 'cheer' : (w.alertT>0 && w.actions.sad) ? 'sad' : v ? 'work:'+v : s;
+  if(key!==w.clipState){
+    const list=CLIP_FOR[key]||CLIP_FOR[s]||['idle'];
+    const opts=list.filter(n=>w.actions[n]);
+    const pref=list.slice(0,2).filter(n=>w.actions[n]);   // vary between the two preferred clips
     const pick = pref.length ? pref[Math.floor(Math.random()*pref.length)] : (opts[0]||null);
-    w.clipState=s;
+    w.clipState=key;
     if(pick && pick!==w.clip){
       const next=w.actions[pick]; next.reset(); next.time=ONCE.has(pick)?0:Math.random()*next.getClip().duration*(pick==='walk'?1:0.6);
       const seatT = s==='lounge'?SOFA_HIPS : (s==='work'||s==='meet'||s==='rest')?CHAIR_HIPS : null;
@@ -923,11 +941,12 @@ function poseModel(w,t,dt,sdt){
     }
   }
   if(w.actions.walk) w.actions.walk.timeScale=w.speed/1.25;
+  if(w.clip && w.clip!=='walk' && w.actions[w.clip]) w.actions[w.clip].timeScale = w.clip==='work' ? (v==='read'?0.45 : v==='code'?1.6 : 1) : (v==='think'?0.6:1); // reading = slow, code running = fast typing
   w.mixer.update(sdt);
   w.mDrop+=(w.dropTarget-w.mDrop)*(1-Math.exp(-dt*(ONCE.has(w.clip)?1.5:6))); w.model.position.y=w.mDrop;
   if(w.mCup) w.mCup.visible = s==='coffee' || (s==='lounge' && w.clip==='sitdrink');
   if(w.mPhone) w.mPhone.visible = (s==='phone' && w.clip==='phone') || (s==='lounge' && w.clip!=='sitdrink') || (s==='walk' && w.phoneWalk);
-  w.g.position.copy(w.pos); w.g.rotation.y=w.heading;
+  w.g.position.copy(w.pos); if(w.cheerT>0 && !w.actions.cheer) w.g.position.y+=Math.abs(Math.sin(t*9))*0.12; w.g.rotation.y=w.heading;
   if(!w.npc) counts[s]=(counts[s]||0)+1;
 }
 if(THREE.GLTFLoader && THREE.SkeletonUtils){
@@ -952,7 +971,7 @@ function updateInfo(){
   document.getElementById('i-dot').style.background=STATE_COL[w.state]||STATE_COL.walk;
   const L=w.live, ti=document.getElementById('i-task');
   if(MODE==='live' && !w.npc){
-    ti.textContent = L.status==='working' ? `งาน: ${L.task||'-'} · ${L.phase||''} ${Math.round((L.progress||0)*100)}%` : (L.status==='paused'?'หยุดพักโดยผู้ควบคุม':'ว่าง รองานใหม่');
+    ti.textContent = L.status==='working' ? `งาน: ${L.task||'-'}${L.attempts>1?` (รอบที่ ${L.attempts})`:''} · ${L.phase||''} ${Math.round((L.progress||0)*100)}%${L.toolCalls?` · ใช้เครื่องมือ ${L.toolCalls} ครั้ง`:''}` : (L.status==='paused'?'หยุดพักโดยผู้ควบคุม':'ว่าง รองานใหม่');
     const S=L.stats||{}; document.getElementById('i-stats').textContent=[S.done!=null?`เสร็จแล้ว ${S.done} งาน`:'',S.cost!=null?`ต้นทุน $${(+S.cost).toFixed(3)}`:''].filter(Boolean).join(' · ');
     return;
   }
@@ -1006,6 +1025,7 @@ function endMeeting(){
 }
 // ---------- Director: who goes where ----------
 let MODE = CFG.mode==='live' ? 'live' : 'demo';
+let JOBS_ACTIVE=false; // live: any job planning/running/synthesizing (bridge.js → Office3D.setActivity)
 const PLACES={
   desk:   w=>({spot:w.seat, state: (MODE==='live' && w.live.status!=='working') ? 'rest' : 'work'}),
   meeting:()=>{ const s=freeSpot(meetSeats); return s&&{spot:s,state:'meet',door:MEET_DOOR}; },
@@ -1046,13 +1066,15 @@ function decide(w){
     const st=w.live.status;
     if(st==='working'){ if(w.state!=='work') sendTo(w,'desk'); w.timer=3; return; }
     if(st==='paused'){ if(w.state!=='lounge' && !sendTo(w,'lounge')) sendTo(w,'desk'); w.timer=6; return; }
-    // idle → small breaks now and then, otherwise relax at the desk
+    // idle (no task) → relax at the desk; a short break is allowed only while no job is planning/running/synthesizing
     const A=Object.assign({coffee:0.12,lounge:0.06,phone:0.05,printer:0.04},CFG.idleBreaks||{});
+    const breaksOk = !(JOBS_ACTIVE && CFG.idleBreaksOnlyWhenTeamIdle!==false);
     if(w.state==='rest'||w.state==='work'){
-      let r=Math.random();
-      for(const k of ['coffee','lounge','phone','printer']){ if(r<A[k]){ if(sendTo(w,k)) return; break; } r-=A[k]; }
+      if(breaksOk){ let r=Math.random();
+        for(const k of ['coffee','lounge','phone','printer']){ if(r<A[k]){ if(sendTo(w,k)) return; break; } r-=A[k]; } }
       w.state='rest'; w.timer=15+Math.random()*15; w.timerTotal=w.timer; return;
     }
+    if(JOBS_ACTIVE && ['coffee','lounge','phone','print'].includes(w.state)){ sendTo(w,'desk'); return; } // a job started while on a break → back to the desk
     sendTo(w,'desk'); return;
   }
   const r=Math.random();
@@ -1087,7 +1109,9 @@ function step(dt){
                   : w.state==='rest'?15+Math.random()*15 : w.state==='visit'?(w.visitT||4) : 999; w.timerTotal=w.timer;
           if(MODE==='live' && w.state==='work') w.timer=3;
           if(w.queue.length || w.pin) w.timer=Math.min(w.timer,0.6);
-          if(MODE==='live' && w.state==='meet' && !w.pin) w.timer=Math.min(w.timer,1); }
+          if(MODE==='live' && w.state==='meet' && !w.pin) w.timer=Math.min(w.timer,1);
+          // arrived at a break spot after a job started (or while still holding a task) → re-decide at once and head back to the desk
+          if(MODE==='live' && !w.pin && ['coffee','lounge','phone','print'].includes(w.state) && (JOBS_ACTIVE || w.live.status==='working')) w.timer=Math.min(w.timer,0.6); }
       }
     } else if(w.state!=='meet' || w.pin || w.queue.length || MODE==='live'){ w.timer-=dt; if(w.timer<=0) decide(w); }
     let dh=w.face-w.heading; dh=Math.atan2(Math.sin(dh),Math.cos(dh)); w.heading+=dh*Math.min(1,dt*8);
@@ -1270,7 +1294,9 @@ function pose(w,t,dt,sdt){
     w.cur[key]+=(T[key]-w.cur[key])*k;
     if(ax==='py') w[obj].position.y=w.cur[key]; else w[obj].rotation[ax]=w.cur[key];
   }
-  w.g.position.copy(w.pos); w.g.rotation.y=w.heading+yawOff;
+  if(w.alertT>0) w.alertT-=sdt; if(w.cheerT>0) w.cheerT-=sdt;
+  if(w.alertT>0) w.ring.material.color.set(0xff5f6d);
+  w.g.position.copy(w.pos); if(w.cheerT>0) w.g.position.y+=Math.abs(Math.sin(t*9))*0.12; w.g.rotation.y=w.heading+yawOff;
   if(!w.npc) counts[w.state]=(counts[w.state]||0)+1;
 }
 
@@ -1315,6 +1341,16 @@ function emit(ev,data){ (listeners[ev]||[]).forEach(f=>{ try{ f(data); }catch(e)
   if(window.parent!==window) try{ window.parent.postMessage({type:'office3d:'+ev, data}, '*'); }catch(e){} }
 function byId(id){ if(id==null) return null; id=String(id);
   return workers.find(w=>w.agentId===id) || workers.find(w=>w.jobId===id) || workers.find(w=>w.name===id) || null; }
+// live desk monitors: one canvas texture per team member, replacing the static screen art on their own monitor
+const liveScreens={};
+function screenFor(w){
+  if(!w||!w.seat||!w.seat.monitor) return null;
+  let e=liveScreens[w.agentId];
+  if(!e){ const c=document.createElement('canvas'); c.width=512; c.height=300;
+    const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=maxAniso; tex.minFilter=THREE.LinearFilter;
+    w.seat.monitor.material=new THREE.MeshBasicMaterial({map:tex}); e=liveScreens[w.agentId]={canvas:c,tex}; }
+  return e;
+}
 function kick(w){
   if(w.state!=='walk'){ if(!w.goLater) w.timer=0; return; }
   // got a task while heading for a break: turn round and go back to the desk
@@ -1333,7 +1369,7 @@ const Office3D={
   setAgent(id,patch={}){
     const w=byId(id); if(!w) return false;
     const before=w.live.status;
-    for(const k of ['status','task','progress','phase','tool','stats']) if(k in patch && patch[k]!==undefined) w.live[k]=patch[k];
+    for(const k of ['status','task','progress','phase','tool','stats','attempts','toolCalls']) if(k in patch && patch[k]!==undefined) w.live[k]=patch[k];
     if(patch.name) w.name=patch.name; if(patch.role) w.role=patch.role;
     if(MODE==='live' && w.live.status!==before) kick(w);
     return true;
@@ -1351,7 +1387,18 @@ const Office3D={
       setTimeout(()=>Office3D.hold(id,'meeting',secs),i*1500); }); return true; },
   /** short speech bubble above someone's name tag */
   say(id,text,secs=3){ const w=byId(id); if(!w) return false; w.bubbleText=String(text); w.bubbleT=secs*60; return true; },
+  /** live: tell the director whether any job is planning/running/synthesizing — while true nobody takes a coffee/sofa/phone break */
+  setActivity(on){ JOBS_ACTIVE=!!on; if(on) workers.forEach(w=>{ if(['coffee','lounge','phone','print'].includes(w.state) && !w.pin) kick(w); }); },
+  /** something went wrong for this person (task failed / cancelled / job failed): red ring for `secs` (+ 'sad' clip if the model has one) */
+  alert(id,secs=4){ const w=byId(id); if(!w) return false; w.alertT=secs; return true; },
+  /** short celebration for several people (job completed): hop in place, or the 'cheer' clip if the model has one */
+  cheer(ids,secs=2.5){ (ids||[]).forEach(id=>{ const w=byId(id); if(w) w.cheerT=secs; }); return true; },
+  /** canvas drawn by the page (bridge.js) and shown on this person's desk monitor; call screenDirty() after drawing */
+  screenCanvas(id){ const e=screenFor(byId(id)); return e?e.canvas:null; },
+  screenDirty(id){ const w=byId(id), e=w&&liveScreens[w.agentId]; if(e) e.tex.needsUpdate=true; },
   _debug(id){ const w=byId(id); return w&&{state:w.state,pos:w.pos.toArray(),path:w.path.map(v=>[v.x,v.z]),after:w.after,timer:w.timer,ghost:w.ghostT,stuck:w.stuckT,pin:w.pin,queue:w.queue}; },
+  _monitorXY(id){ const w=byId(id); if(!w||!w.seat||!w.seat.monitor) return null; const v=new THREE.Vector3(); w.seat.monitor.getWorldPosition(v); v.project(camera);
+    const r=renderer.domElement.getBoundingClientRect(); return {x:r.left+(v.x*0.5+0.5)*r.width, y:r.top+(-v.y*0.5+0.5)*r.height, visible:v.z<1}; },
   agents(){ return workers.map(w=>({id:w.agentId,name:w.name,role:w.role,state:w.state,live:Object.assign({},w.live),x:+w.pos.x.toFixed(2),z:+w.pos.z.toFixed(2)})); },
   select(id){ select(byId(id)); },
   setSpeed(n){ speed=Math.max(1,Math.min(4,n|0)); },

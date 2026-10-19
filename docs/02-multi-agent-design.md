@@ -76,7 +76,7 @@ Agent { id, name, nick, role, model, effort, toolsEnabled, duties, tools[], stat
 | `agent.updated` | สถานะ/เฟส/ตัวชี้วัดของพนักงานเปลี่ยน | สีวงแหวน, ข้อความใต้ชื่อ |
 | `task.created/started/updated/review/failed` | สถานะงานเปลี่ยน | การ์ดงาน, drawer |
 | `task.assigned {from,to}` | มอบหมาย/ส่งต่อถึงมือแล้ว | แอนิเมชันก้อนงานวิ่ง |
-| `task.progress` | เฟส, %, ข้อความสด, `tool` (เครื่องมือที่กำลังใช้หรือ null), `toolCalls` (ของงาน), `agentToolCalls` (ของคน) | วงแหวนความคืบหน้า, กล่องข้อความสด, ไอคอนเครื่องมือใต้ป้ายงาน, ชิป "🔎 ค้นเว็บ" บนการ์ดงาน |
+| `task.progress` | เฟส, %, ข้อความสด, `tool` (เครื่องมือที่กำลังใช้หรือ null), `toolCalls` (ของงาน), `agentToolCalls` (ของคน); เมื่อเป็นขั้นของเครื่องมือจะมี `toolStep` = `start` → `input` (+`toolInput` = คำค้น / URL / คำสั่ง) → `result` (+`toolResult` สรุปผล, `toolOk`) | วงแหวนความคืบหน้า, กล่องข้อความสด, ไอคอนเครื่องมือใต้ป้ายงาน, ชิป "🔎 ค้นเว็บ" บนการ์ดงาน, ลำดับการใช้เครื่องมือใน "หน้าจอการทำงาน" (dashboard + office3d) |
 | `task.handoff {from,to,reason}` | เกิดการส่งต่อ | toast + log |
 | `task.completed` | งานเสร็จ | ก้อนงานวิ่งกลับกัปตัน |
 | `job.*` | สถานะโจทย์ | แท็บผลงาน, KPI, เอฟเฟกต์ฉลอง |
@@ -147,9 +147,9 @@ block ผลลัพธ์ที่รู้จัก: `web_search_tool_result`
 **การไหลของข้อมูลไปยัง dashboard**
 
 ```
-llm.onTool → executor.onProgress({ phase, tool, toolStarted }) → orchestrator.progress()
+llm.onTool → executor.onProgress({ phase, tool, toolStarted, toolStep, toolInput, toolResult, toolOk }) → orchestrator.progress()
   → recordToolUse() เพิ่ม task.toolCalls / agent.metrics.toolCalls
-  → publish task.progress { tool, toolCalls, agentToolCalls }  (และ agent.updated / metrics.updated พก metrics.toolCalls)
+  → publish task.progress { tool, toolCalls, agentToolCalls, toolStep?, toolInput?, toolResult?, toolOk? }  (และ agent.updated / metrics.updated พก metrics.toolCalls)
   → app.js: ไอคอนใต้ป้ายงานบน canvas, ชิปบนการ์ดงาน, ช่อง "ใช้เครื่องมือ" ใน KPI / การ์ดตัวชี้วัด / drawer
 ```
 

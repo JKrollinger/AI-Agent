@@ -72,6 +72,35 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tag .task{font-size:10.5px;color:#cfe6ff;max-width:180px;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
 .tag .bubble{font-size:11px;color:#1d2430;background:#fff;border-radius:8px;padding:2px 7px;margin-bottom:2px;text-shadow:none;box-shadow:0 1px 3px #0005}
 html,body{margin:0}
+/* work-screen popup (standalone page; the dashboard renders its own when embedded) */
+.screen{position:fixed;inset:0;z-index:30;background:#0b0f1799;display:grid;place-items:center;padding:16px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.screen-box{width:min(860px,100%);max-height:calc(100vh - 32px);background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;box-shadow:0 30px 80px #0008;overflow:hidden}
+.screen-box header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.screen-box header strong{font-size:16px}
+.screen-box header .meta{font-size:12px}
+.screen-box .pill{margin-left:auto;font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.screen-box .pill[data-state="working"]{color:#1f9d6f;border-color:#3fd1a8}
+.screen-box .pill[data-state="paused"]{color:#b8941f;border-color:#e0a030}
+.screen-box header button{padding:4px 9px}
+.screen-body{padding:12px 16px 16px;overflow:auto;display:grid;gap:12px;font-size:13px}
+.screen-body h4{margin:0 0 4px;font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+.t-title b,.t-meta b,.t-err b,.qa b{font-weight:600}
+.t-meta{color:var(--muted);margin-top:2px}
+.t-err{color:#c0392b}
+.t-bar{height:5px;border-radius:4px;background:#8b94a333;overflow:hidden;margin-top:6px}
+.t-bar i{display:block;height:100%;background:#3fd1a8;transition:width .3s}
+.termwrap{min-height:56px;max-height:260px;overflow:auto;background:#0b0f17;border:1px solid var(--line);border-radius:10px}
+.term{margin:0;padding:10px 12px;font:12.5px/1.5 var(--mono);color:#cfe6ff;white-space:pre-wrap;word-break:break-word}
+.term.live::after{content:"▍";color:#3fd1a8;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.tools{margin:0;padding-left:18px;display:grid;gap:6px}
+.tools li .tl-head{font-weight:500}
+.tools li code{display:block;font:12px var(--mono);color:#2f6fde;word-break:break-all}
+.tools li .tl-res{color:var(--muted)}
+.qa.ok b{color:#1f9d6f}.qa.warn b{color:#d9822b}
+.fb{margin:6px 0 0;padding:8px 10px;font:12px/1.5 var(--mono);white-space:pre-wrap;background:#8b94a31a;border-radius:8px}
+.hist{margin:0;padding-left:18px;color:var(--muted);display:grid;gap:3px}
+.muted{color:var(--muted)}
 [hidden]{display:none !important} /* .info/#loading set display:grid, so the hidden attribute needs to win */
 /* Embedded in the dashboard (?embed=1): the dashboard shows connection/details itself, so keep only the scene + name tags */
 :root[data-embed="1"] .clock, :root[data-embed="1"] .info, :root[data-embed="1"] .hint{display:none}
@@ -93,7 +122,25 @@ html,body{margin:0}
   <div class="meta" id="i-task"></div>
   <div class="meta" id="i-stats"></div>
 </section>
-<div class="hint">ลากเพื่อหมุน · เลื่อนหรือบีบเพื่อซูม · แตะพนักงานเพื่อดูข้อมูล</div>
+<div class="hint">ลากเพื่อหมุน · เลื่อนหรือบีบเพื่อซูม · แตะพนักงานหรือจอคอมเพื่อดูการทำงานจริง</div>
+
+<!-- หน้าจอการทำงานจริงของพนักงานหนึ่งคน (workscreen.js) — เปิดเมื่อแตะจอคอม/ตัวละคร ปิดด้วย ✕ หรือ Esc -->
+<section class="screen" id="screen" hidden role="dialog" aria-modal="true" aria-label="หน้าจอการทำงานจริง">
+  <div class="screen-box">
+    <header>
+      <div><strong id="s-name"></strong><div class="meta" id="s-role"></div></div>
+      <span class="pill" id="s-status" data-state="idle"></span>
+      <button id="s-close" title="ปิด (Esc)">✕</button>
+    </header>
+    <div class="screen-body">
+      <section><h4>งาน</h4><div id="s-task"></div></section>
+      <section><h4>ข้อความที่สตรีมออกมา (สด)</h4><div class="termwrap" id="s-termwrap"><pre class="term" id="s-term"></pre></div></section>
+      <section><h4>การใช้เครื่องมือตามลำดับ</h4><ol class="tools" id="s-tools"></ol></section>
+      <section><h4>ผลตรวจ QA</h4><div id="s-review"></div></section>
+      <section><h4>งานย้อนหลังของคนนี้</h4><ul class="hist" id="s-hist"></ul></section>
+    </div>
+  </div>
+</section>
 
 <!-- three.js r128 (vendored, works offline) -->
 <script src="vendor/three.min.js"></script>
@@ -104,5 +151,6 @@ html,body{margin:0}
 <script src="config.js"></script>
 <script src="office3d.js"></script>
 <script src="bridge.js"></script>
+<script src="workscreen.js"></script>
 </body>
 </html>

@@ -534,16 +534,17 @@ async function liveRun({ agent, task, context, signal, onProgress }) {
       onProgress?.({ phase: lastPhase, progress: Math.min(0.95, 0.1 + (full.length / expectedChars) * 0.85), text: full, tool: null });
     },
     // เหตุการณ์ของ server tools ระหว่าง stream: start (เริ่มเรียก) → input (รู้คำค้น/URL/คำสั่งแล้ว) → result (ได้ผลกลับมา)
-    onTool: ({ name, phase, summary }) => {
+    // toolStep/toolInput/toolResult ไปกับ task.progress ให้หน้าจอ (dashboard + office3d) แสดงคำค้น/URL/คำสั่งและผลลัพธ์ของแต่ละครั้งได้
+    onTool: ({ name, phase, summary, ok }) => {
       if (phase === "continue") return onProgress?.({ phase: `กำลังทำงานต่อ (${summary})` });
       const meta = TOOL_META[name] || { label: name, phase: `กำลังใช้ ${name}` };
       if (phase === "start") {
         toolCalls += 1;
-        onProgress?.({ phase: meta.phase, tool: name, toolStarted: true, progress: 0.12 });
+        onProgress?.({ phase: meta.phase, tool: name, toolStarted: true, toolStep: "start", progress: 0.12 });
       } else if (phase === "input") {
-        onProgress?.({ phase: summary ? `${meta.phase}: ${summary}` : meta.phase, tool: name });
+        onProgress?.({ phase: summary ? `${meta.phase}: ${summary}` : meta.phase, tool: name, toolStep: "input", toolInput: summary || "" });
       } else if (phase === "result") {
-        onProgress?.({ phase: summary || `${meta.label} เสร็จ`, tool: name });
+        onProgress?.({ phase: summary || `${meta.label} เสร็จ`, tool: name, toolStep: "result", toolResult: summary || "", toolOk: ok !== false });
       }
     },
   });
@@ -756,11 +757,12 @@ async function simRun({ agent, task, context, signal, onProgress, grant = null }
       toolCalls += 1;
       if (tp.tool === "web_search") toolUsage.web_search_requests += 1;
       if (tp.tool === "web_fetch") toolUsage.web_fetch_requests += 1;
-      onProgress?.({ phase: meta.phase, tool: tp.tool, toolStarted: true, progress, text });
+      onProgress?.({ phase: meta.phase, tool: tp.tool, toolStarted: true, toolStep: "start", progress, text });
       await sleep(rand(250, 450) / speed(), signal);
-      onProgress?.({ phase: `${meta.phase}: ${summary}`, tool: tp.tool, progress, text });
+      onProgress?.({ phase: `${meta.phase}: ${summary}`, tool: tp.tool, toolStep: "input", toolInput: summary, progress, text });
       await sleep(rand(900, 1700) / speed(), signal);
-      onProgress?.({ phase: tp.result(summary), tool: tp.tool, progress, text });
+      const resultText = tp.result(summary);
+      onProgress?.({ phase: resultText, tool: tp.tool, toolStep: "result", toolResult: resultText, toolOk: true, progress, text });
       await sleep(rand(350, 600) / speed(), signal);
     }
   }
@@ -798,6 +800,8 @@ export function editGrantFor({ agent, task, context, onProgress }) {
  * onProgress รับ { phase, progress, text, tool, toolStarted, note }:
  *   tool        = ชื่อเครื่องมือที่กำลังใช้ (null = ไม่ได้ใช้, undefined = ไม่เปลี่ยน)
  *   toolStarted = true เมื่อเริ่มใช้เครื่องมือครั้งใหม่ (orchestrator ใช้นับ task.toolCalls / agent.metrics.toolCalls)
+ *   toolStep    = "start" | "input" | "result" ขั้นของการใช้เครื่องมือครั้งนั้น, toolInput = คำค้น/URL/คำสั่ง (ขั้น input),
+ *                 toolResult = สรุปผล + toolOk (ขั้น result) — ส่งต่อใน task.progress ให้หน้าจอการทำงานแสดงลำดับการใช้เครื่องมือ
  *   note        = ข้อความลง log/ประวัติงาน (เช่น เหตุผลที่ถอยไปทำแบบข้อเสนอ)
  * งานของ coder ในโปรเจกต์ที่ให้สิทธิ์แก้ไฟล์ → apply.js (Claude Code headless ใน live / patch จำลองใน sim) → result.patch รออนุมัติ
  * @returns {{output:string, usage:object, model:string, review?:object, toolCalls:number, patch?:object|null}}

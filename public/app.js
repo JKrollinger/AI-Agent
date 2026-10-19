@@ -72,6 +72,8 @@ const S = {
   mode: "sim",
   view: "2d", // มุมมองฉาก: "2d" เมืองมอร็อค (scene.js) | "3d" ออฟฟิศ (office3d/ ใน iframe) — จำไว้ใน localStorage
   sceneSel: null, // พนักงานที่ถูกเลือกอยู่ในฉาก 3 มิติ (กันคำสั่ง select ส่งวนไปมาระหว่างหน้าแม่กับ iframe)
+  screen: null, // agentId ที่เปิด "หน้าจอการทำงานจริง" อยู่ (popup)
+  toolLog: new Map(), // taskId -> [{t, tool, input, result, ok}] จาก task.progress.toolStep (คำค้น/URL/คำสั่ง + ผล)
   settings: { speed: 1 },
   agents: new Map(),
   tasks: new Map(),
@@ -147,19 +149,19 @@ function handle(ev) {
       break;
     case "agent.updated":
       S.agents.set(d.agent.id, d.agent);
-      mark("metrics", "drawer", "roster");
+      mark("metrics", "drawer", "roster", "screen");
       break;
     case "task.created": case "task.started": case "task.updated":
-      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster");
+      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
       break;
     case "task.review": {
-      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip");
+      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "screen");
       const who = d.task.assignedTo || lastAgentOf(d.task);
       if (who) sc().fx(who, d.approved ? "bless" : "fail");
       break;
     }
     case "task.failed": {
-      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster");
+      upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
       const who = lastAgentOf(d.task);
       if (who) { sc().fx(who, "fail"); sc().emote(who, "question"); }
       if (!d.retry) toast(`❌ งาน "${trunc(d.task.title, 40)}" ล้มเหลว: ${d.error || ""}`, "bad");
@@ -191,7 +193,7 @@ function handle(ev) {
       spawnPacket(d.from, "captain", "ส่งผลงาน ✓", S.agents.get(d.from)?.color || "#3dd598", "return");
       sc().visit(d.from, "captain"); // เดินไปส่งผลงานให้กัปตัน แล้วกลับจุดประจำ
       sc().emote(d.from, "heart");
-      mark("tasks", "kpis", "drawer", "strip", "roster");
+      mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
       break;
     case "task.progress": {
       const t = S.tasks.get(d.taskId);
@@ -199,14 +201,16 @@ function handle(ev) {
       const a = S.agents.get(d.agentId);
       if (a) { a.phase = d.phase; if ("tool" in d) a.activeTool = d.tool; if (d.agentToolCalls != null && a.metrics) a.metrics.toolCalls = d.agentToolCalls; }
       S.live.set(d.agentId, d.text || "");
+      if (d.toolStep) recordToolStep(ev.ts, d);
       liveUpdate(d);
+      if (S.screen === d.agentId) mark("screen");
       break;
     }
     case "job.created": case "job.planned": case "job.updated":
-      upsertJob(d.job); mark("tasks", "results", "kpis", "strip");
+      upsertJob(d.job); mark("tasks", "results", "kpis", "strip", "screen");
       break;
     case "job.completed":
-      upsertJob(d.job); burst("captain");
+      upsertJob(d.job); burst("captain"); mark("screen");
       toast(`🎉 งานเสร็จสมบูรณ์: "${trunc(d.job.goal, 50)}" ใช้เวลา ${fmtMs(d.job.durationMs)} ต้นทุน ${fmtUsd(d.job.costUsd)}`, "ok");
       mark("tasks", "results", "kpis", "strip");
       break;
@@ -242,6 +246,7 @@ function flush() {
   if (dirty.has("log")) renderLog();
   if (dirty.has("results")) renderResults();
   if (dirty.has("drawer")) renderDrawer();
+  if (dirty.has("screen")) renderScreen();
   if (dirty.has("roster")) renderRoster();
   if (dirty.has("strip")) renderStrip();
   dirty.clear();
@@ -438,6 +443,7 @@ function renderDrawer() {
     html = `<div class="d-head"><div class="avatar" style="border-color:${a.color}">${avatarHtml(a, 30)}</div>
         <div><h2>${esc(a.name)}</h2><div class="role">${esc(a.roleLabel)}${a.jobTh ? ` (${esc(a.jobTh)})` : ""} · ${esc(a.model)}</div></div>
         <span class="chip ${a.status === "working" ? "running" : a.status === "paused" ? "review" : ""}" style="margin-left:auto">${STATUS_TH[a.status]}</span>
+        <button class="btn small ghost" data-screen="${a.id}" title="ข้อความที่สตรีม เครื่องมือที่ใช้ และผลตรวจ QA ของคนนี้">🖥️ หน้าจอการทำงาน</button>
         <button class="close" title="ปิด">×</button></div>
       <div class="d-body">
         <div class="section"><h3>หน้าที่</h3><div class="duty">${esc(a.duties || "—")}</div><div class="r-line2" style="margin-top:4px">แก้ได้ที่ปุ่ม ⚙ ตั้งค่า AI — กัปตันใช้หน้าที่นี้เลือกคนทำงาน</div></div>
@@ -478,6 +484,7 @@ function renderDrawer() {
     html = `<div class="d-head"><div class="avatar" style="border-color:${ri.color}">${ri.emoji}</div>
         <div><h2 style="font-size:14px">${esc(t.title)}</h2><div class="role">${esc(ri.label)} · ${who ? `ผู้รับ: ${esc(who.name)}` : "ยังไม่มอบหมาย"} · รอบที่ ${t.attempts} · ใช้เครื่องมือ <span id="dTools">${t.toolCalls || 0}</span> ครั้ง</div></div>
         <span class="chip ${t.status}" style="margin-left:auto">${STATUS_TH[t.status]}</span>
+        ${who ? `<button class="btn small ghost" data-screen="${who.id}" title="หน้าจอการทำงานของ ${esc(who.name)}">🖥️ หน้าจอ</button>` : ""}
         <button class="close" title="ปิด">×</button></div>
       <div class="d-body">
         <div class="section"><h3>โจทย์หลัก</h3><div>${esc(job?.goal || "")}</div></div>
@@ -553,6 +560,97 @@ function toast(msg, kind = "") {
 }
 
 // ---------------------------------------------------------------------------
+// หน้าจอการทำงานจริง (popup ต่อคน) — เปิดจาก drawer หรือจากการแตะจอคอมในฉาก 3 มิติ
+// ข้อมูลทั้งหมดมาจาก event จริง: task.progress (ข้อความสด/เฟส/%/เครื่องมือ), task.completed (ผลงาน), task.review (QA)
+// ---------------------------------------------------------------------------
+function recordToolStep(ts, d) { // start → input (คำค้น/URL/คำสั่ง) → result (สรุปผล) ต่อการใช้เครื่องมือ 1 ครั้ง
+  const log = S.toolLog.get(d.taskId) || [];
+  if (d.toolStep === "start") log.push({ t: ts, tool: d.tool, input: "", result: "", ok: null });
+  else {
+    const e = [...log].reverse().find((x) => x.tool === d.tool && (d.toolStep === "input" ? !x.input : !x.result));
+    if (e) { if (d.toolStep === "input") e.input = d.toolInput || ""; else { e.result = d.toolResult || ""; e.ok = d.toolOk !== false; } }
+    else log.push({ t: ts, tool: d.tool, input: d.toolInput || "", result: d.toolResult || "", ok: d.toolOk ?? null });
+  }
+  if (log.length > 60) log.splice(0, log.length - 60);
+  S.toolLog.set(d.taskId, log);
+}
+const ENTRY_TH = { queued: "รอคิว", assigned: "รับงานแล้ว", running: "กำลังทำ", review: "รอตรวจ", done: "เสร็จ", failed: "ล้มเหลว", cancelled: "ยกเลิก" };
+let screenRenderedAt = 0, screenTimer = 0;
+function openScreen(agentId) { if (!agentId || !S.agents.has(agentId)) return; S.screen = agentId; S.screenStick = true; renderScreen(true); }
+function closeScreen() { S.screen = null; $("#screen").classList.add("hidden"); $("#screen").innerHTML = ""; }
+/** งานของคนนี้เรียงใหม่→เก่า (งานปัจจุบันก่อน) */
+function tasksOf(agentId) {
+  const a = S.agents.get(agentId);
+  const mine = [...S.tasks.values()].filter((t) => t.assignedTo === agentId || t.history?.some((h) => h.agentId === agentId)).sort((x, y) => (y.startedAt || y.createdAt) - (x.startedAt || x.createdAt));
+  const cur = a?.currentTaskId ? S.tasks.get(a.currentTaskId) : null;
+  return cur ? [cur, ...mine.filter((t) => t.id !== cur.id)] : mine;
+}
+function renderScreen(force = false) {
+  if (!S.screen) return;
+  const wait = 100 - (performance.now() - screenRenderedAt); // ≤10 ครั้ง/วินาที แม้ stream จะถี่
+  if (!force && wait > 0) { if (!screenTimer) screenTimer = setTimeout(() => { screenTimer = 0; mark("screen"); }, wait); return; }
+  screenRenderedAt = performance.now();
+  const box = $("#screen"), a = S.agents.get(S.screen);
+  if (!a) return closeScreen();
+  const list = tasksOf(a.id), t = list[0] || null;
+  const isCap = a.role === "captain";
+  // กัปตันไม่มีงานย่อย: งานของกัปตันคือโจทย์ (วางแผน/รวบรวมผล) — ใช้ป้ายและเฟสจริงจาก agent.updated และผลสรุปจริงของโจทย์ล่าสุด (job.result)
+  const jobs = isCap ? [...S.jobs.values()].sort((x, y) => y.createdAt - x.createdAt) : [];
+  const capJob = isCap ? jobs.find((j) => ["planning", "synthesizing"].includes(j.status)) || jobs.find((j) => j.status === "done" && j.result) || jobs[0] || null : null;
+  const working = isCap ? a.status === "working" : a.status === "working" && t && t.assignedTo === a.id && ["assigned", "running"].includes(t.status);
+  const live = working ? S.live.get(a.id) || "" : "";
+  const body = isCap
+    ? (working ? `${a.currentTaskTitle || ""}\n${a.phase || ""}` : capJob?.result || a.lastOutput || "—")
+    : working ? live || "กำลังเริ่ม…" : t ? t.output || S.live.get(a.id) || a.lastOutput || "—" : a.lastOutput || "—";
+  const tools = t ? S.toolLog.get(t.id) || [] : [];
+  const termEl = box.querySelector(".scr-term");
+  const stick = termEl ? termEl.scrollTop + termEl.clientHeight >= termEl.scrollHeight - 8 : true;
+  const built = box.dataset.agent === a.id;
+  if (!built) {
+    box.dataset.agent = a.id;
+    box.innerHTML = `<div class="modal screen" role="document">
+      <div class="m-head"><div class="avatar" style="border-color:${a.color}">${avatarHtml(a, 26)}</div>
+        <div><h2>${esc(a.name)} <span class="r-sub">${esc(a.roleLabel)}</span></h2><div class="r-line2" id="scrStatus"></div></div>
+        <button class="close" data-close-screen title="ปิด (Esc)">×</button></div>
+      <div class="m-body" style="display:grid;gap:14px">
+        <div class="section scr-task"><h3>งาน</h3><div id="scrTask"></div></div>
+        <div class="section"><h3 id="scrTermTitle">ข้อความที่สตรีมออกมา (สด)</h3><div class="scr-term"><pre id="scrTerm"></pre></div></div>
+        <div class="section"><h3>การใช้เครื่องมือตามลำดับ</h3><ol class="tool-log" id="scrTools"></ol></div>
+        <div class="section"><h3>ผลตรวจ QA</h3><div id="scrReview"></div></div>
+        <div class="section"><h3>งานย้อนหลังของคนนี้</h3><ul class="scr-hist" id="scrHist"></ul></div>
+      </div></div>`;
+    box.classList.remove("hidden");
+  }
+  $("#scrStatus").textContent = `${STATUS_TH[a.status]} · ${esc(a.model)}${a.metrics ? ` · เสร็จแล้ว ${a.metrics.tasksDone} งาน · ใช้เครื่องมือ ${a.metrics.toolCalls || 0} ครั้ง` : ""}`;
+  $("#scrTask").innerHTML = isCap
+    ? (working
+      ? `<div><b>งานปัจจุบัน:</b> ${esc(a.currentTaskTitle || "โจทย์ของทีม")} <span class="chip running">${STATUS_TH[a.status]}</span></div><div class="r-line2">เฟส: ${esc(a.phase || "—")}</div>`
+      : capJob
+        ? `<div><b>โจทย์ล่าสุด:</b> ${esc(capJob.goal)} <span class="chip ${esc(capJob.status)}">${esc(capJob.status)}</span></div><div class="r-line2">${capJob.taskIds?.length || 0} งานย่อย · ${fmtMs(capJob.durationMs)} · ${fmtUsd(capJob.costUsd)}</div>`
+        : `<div style="color:var(--muted)">ยังไม่มีโจทย์</div>`)
+    : t
+    ? `<div><b>${working ? "งานปัจจุบัน" : "งานล่าสุด"}:</b> ${esc(t.title)}${t.attempts > 1 ? ` <span class="chip">รอบที่ ${t.attempts}</span>` : ""} <span class="chip ${esc(t.status)}">${ENTRY_TH[t.status] || esc(t.status)}</span></div>
+       <div class="r-line2">เฟส: ${esc(t.phase || "—")} · ${pct(t.progress)}${t.activeTool ? ` · <span class="tool-chip">${toolChip(t.activeTool)}</span>` : ""}${t.toolCalls ? ` · ใช้เครื่องมือ ${t.toolCalls} ครั้ง` : ""}</div>
+       <div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%;background:${a.color}"></i></div>`
+    : `<div style="color:var(--muted)">${working ? "กำลังเริ่มงาน…" : "ยังไม่มีงาน"}</div>`;
+  $("#scrTermTitle").textContent = isCap ? (working ? "สิ่งที่กัปตันกำลังทำ (สด)" : "ผลสรุปของโจทย์ล่าสุด") : working ? "ข้อความที่สตรีมออกมา (สด)" : "ผลงาน";
+  const pre = $("#scrTerm"); if (pre.textContent !== body) pre.textContent = body; pre.classList.toggle("live", !!working);
+  if (stick) { const w = $("#screen .scr-term"); w.scrollTop = w.scrollHeight; }
+  $("#scrTools").innerHTML = tools.length
+    ? tools.map((x) => `<li><div>${fmtTime(x.t)} ${toolChip(x.tool)}${x.ok === false ? " · ไม่สำเร็จ" : ""}</div>${x.input ? `<code>${esc(x.input)}</code>` : ""}${x.result ? `<div class="res">→ ${esc(x.result)}</div>` : ""}</li>`).join("")
+    : `<li style="color:var(--muted)">${t ? "ยังไม่ได้ใช้เครื่องมือในงานนี้" : "—"}</li>`;
+  $("#scrReview").innerHTML = t?.review
+    ? `<div class="review-box"><div class="score" style="color:${t.review.approved ? "var(--ok)" : "var(--warn)"}">${t.review.score}/100 ${t.review.approved ? "ผ่าน" : t.review.acceptedWithNotes ? "รับพร้อมหมายเหตุ" : "ส่งกลับแก้"}</div>
+        <div style="margin-top:4px">${esc(t.review.summary || "")}</div>${t.review.feedback ? `<pre class="stream" style="margin-top:8px">${esc(t.review.feedback)}</pre>` : ""}</div>`
+    : `<div style="color:var(--muted)">${working ? "รอ QA ตรวจเมื่อเสร็จ" : "—"}</div>`;
+  $("#scrHist").innerHTML = isCap
+    ? (jobs.length ? jobs.slice(0, 6).map((j) => `<li>${fmtTime(j.finishedAt || j.createdAt)} · ${esc(trunc(j.goal, 48))} · ${esc(j.status)}${j.costUsd ? ` · ${fmtUsd(j.costUsd)}` : ""}</li>`).join("") : `<li>—</li>`)
+    : list.length > 1
+    ? list.slice(1, 7).map((x) => `<li>${fmtTime(x.finishedAt || x.startedAt || x.createdAt)} · ${esc(x.title)}${x.attempts > 1 ? ` (รอบ ${x.attempts})` : ""} · ${ENTRY_TH[x.status] || esc(x.status)}${x.review ? ` · QA ${x.review.score}` : ""}</li>`).join("")
+    : `<li>—</li>`;
+}
+
+// ---------------------------------------------------------------------------
 // ฉากเมืองมอร็อค (scene.js) — ตัวละครสไปรต์พิกเซลอาร์ต + แอนิเมชันเหตุการณ์
 // ---------------------------------------------------------------------------
 const canvas = $("#floor");
@@ -610,6 +708,7 @@ function initView() {
     if (!office.frame || e.source !== office.frame.contentWindow || e.origin !== location.origin) return; // รับเฉพาะจาก iframe ของเราเอง
     const d = e.data || {};
     if (d.type === "office3d:ready") { office.ready = true; office.send("pause", S.view !== "3d"); return; }
+    if (d.type === "office3d:screen") { if (d.data?.agentId) openScreen(d.data.agentId); return; } // แตะจอคอมของคนนั้น
     if (d.type === "office3d:select") { // ผู้ใช้แตะตัวละคร (หรือพื้นว่าง = null) ในฉาก 3 มิติ
       const id = d.data?.agentId || null;
       S.sceneSel = id;
@@ -755,6 +854,9 @@ document.addEventListener("click", (e) => {
   if (el.closest("#stripNew")) { $("#goalInput").focus(); return; }
   if (el.closest("#settingsBtn")) return openSettings();
   if (el.closest("[data-close-settings]") || el.id === "settings") return closeSettings();
+  const scrBtn = el.closest("[data-screen]");
+  if (scrBtn) return openScreen(scrBtn.dataset.screen);
+  if (el.closest("[data-close-screen]") || el.id === "screen") return closeScreen();
   if (el.classList.contains("cfg-save")) {
     const row = el.closest("[data-cfg]");
     const body = { model: row.querySelector(".cfg-model").value, effort: row.querySelector(".cfg-effort").value };
@@ -791,7 +893,7 @@ document.addEventListener("click", (e) => {
   const taskEl = el.closest(".task[data-task]");
   if (taskEl && !el.closest(".controls")) return openDrawer("task", taskEl.dataset.task);
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); closeSettings(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.screen) return closeScreen(); closeDrawer(); closeSettings(); } });
 $("#roster").addEventListener("mouseover", (e) => { const r = e.target.closest(".roster-row"); if (r) sc().setHover(r.dataset.agent); });
 $("#roster").addEventListener("mouseleave", () => sc().setHover(null));
 

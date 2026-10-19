@@ -351,7 +351,7 @@ async function start(task, agent) {
   }
 }
 
-function progress(task, agent, { phase, progress: p, text, tool, toolStarted, note, level }) {
+function progress(task, agent, { phase, progress: p, text, tool, toolStarted, toolStep, toolInput, toolResult, toolOk, note, level }) {
   if (note) { // ข้อความจาก executor/adapter ที่ต้องเข้า log และประวัติงาน (เช่น ถอยไปทำแบบข้อเสนอเพราะไม่มี claude CLI)
     task.history.push({ t: now(), type: "note", agentId: agent.id, note });
     bus.log(`ℹ️ ${note}`, { taskId: task.id, agentId: agent.id, ...(level ? { level } : {}) });
@@ -373,7 +373,7 @@ function progress(task, agent, { phase, progress: p, text, tool, toolStarted, no
   if (toolStarted) recordToolUse(agent, task);
 
   const last = progressStamp.get(task.id) || 0;
-  if (!phaseChanged && !toolChanged && !toolStarted && now() - last < 180) return;
+  if (!phaseChanged && !toolChanged && !toolStarted && !toolStep && now() - last < 180) return;
   progressStamp.set(task.id, now());
   bus.publish("task.progress", {
     taskId: task.id,
@@ -384,6 +384,8 @@ function progress(task, agent, { phase, progress: p, text, tool, toolStarted, no
     tool: task.activeTool,
     toolCalls: task.toolCalls,
     agentToolCalls: agent.metrics.toolCalls,
+    // รายละเอียดการใช้เครื่องมือครั้งนี้ (มีเฉพาะ event ที่เป็นขั้นของเครื่องมือ): start → input (คำค้น/URL/คำสั่ง) → result (สรุปผล)
+    ...(toolStep ? { toolStep, toolInput, toolResult, toolOk } : {}),
   });
 }
 

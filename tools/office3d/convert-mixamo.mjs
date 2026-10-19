@@ -29,6 +29,7 @@ const PREFIX = outName.replace(/[^a-z0-9]+/gi, "").slice(0, 6).toLowerCase() || 
 // Scene states pick clips in this order (office3d.js CLIP_FOR):
 //   work: work · walk: walk · meet: meet, meet2, sit · lounge: lounge, sitdrink, meet2, sit
 //   coffee: coffee · phone: phone, talk · printer/visitor: idle, coffee · visit: talk, idle · rest: meet, meet2, lounge, sit
+//   cheer (optional, job completed) · sad (optional, task failed) — without these clips the scene hops / shows a red ring instead
 const CLIP_NAMES = [
   [/^typing/, "work"],
   [/^(walking|happy walk|texting and walking|walk)/, "walk"],
@@ -39,6 +40,8 @@ const CLIP_NAMES = [
   [/^drinking/, "coffee"],
   [/(talking on (a )?phone|phone pacing|talking phone)/, "phone"],
   [/^talking/, "talk"],
+  [/^(cheering|victory|happy|excited|fist pump)/, "cheer"],      // optional: job completed
+  [/^(defeated|sad|disappointed|rejected|frustrated)/, "sad"],   // optional: task failed / cancelled
   [/(idle)$/, "idle"],
 ];
 

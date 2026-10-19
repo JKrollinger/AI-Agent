@@ -191,6 +191,18 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .stage.view-3d #floor { visibility: hidden; }
 .stage.view-3d .legend { display: none; }
 
+/* ---------- หน้าจอการทำงานจริง (popup ต่อคน) ---------- */
+.modal.screen { width: min(880px, 100%); }
+.scr-task .r-line2 { white-space: normal; }
+.scr-term { max-height: 280px; overflow: auto; background: #0c1220; border: 1px solid var(--line); border-radius: 10px; }
+.scr-term pre { margin: 0; padding: 10px 12px; font: 12.5px/1.5 ui-monospace, Consolas, "Courier New", monospace; color: #cfe6ff; white-space: pre-wrap; word-break: break-word; }
+.scr-term pre.live::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--ok); }
+.tool-log { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12.5px; }
+.tool-log code { display: block; font: 12px ui-monospace, Consolas, monospace; color: var(--info); word-break: break-all; }
+.tool-log .res { color: var(--muted); }
+.scr-hist { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; display: grid; gap: 3px; }
+.scr-hist li.cur { color: var(--text); }
+
 /* ---------- Side panel ---------- */
 .panel { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
 .tabs { display: flex; border-bottom: 1px solid var(--line); }
