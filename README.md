@@ -15,6 +15,8 @@
 - แผงรายชื่อทีมซ้าย (สถานะ · % · เสร็จวันนี้ · เครื่องมือ) การ์ดงานล่าสุดพร้อมไทม์ไลน์ 5 ขั้น และปุ่ม "⚙ ตั้งค่า AI" เลือกโมเดล/ความลึก/เครื่องมือต่อคน
 - รายละเอียด: [docs/05-ragnarok-theme.md](docs/05-ragnarok-theme.md) (ตารางอาชีพ, สกิล, ลิขสิทธิ์) · [docs/04-scene-spec.md](docs/04-scene-spec.md) (engine ฉาก) · [docs/03-sprite-spec.md](docs/03-sprite-spec.md) (รูปแบบสไปรต์ + `tools/render-sprite.mjs`) · [docs/06-dashboard-layout.md](docs/06-dashboard-layout.md) (เลย์เอาต์)
 - ทดสอบฉากเดี่ยว ๆ ได้ที่ `/scene-test.html`
+- **ออฟฟิศ 3 มิติ:** ทีมเดียวกันในร่างคนจริงในออฟฟิศ (three.js + ตัวละคร Mixamo) เดินรับ/ส่งงาน นั่งพิมพ์ เข้าห้องประชุม ตามสถานะงานสด ๆ — กดปุ่ม **🏢 ออฟฟิศ 3D** มุมขวาบนของเวทีในแดชบอร์ดเพื่อสลับจากแผนที่มอร็อค (จำค่าที่เลือกไว้) แตะตัวละครเปิดรายละเอียดได้เหมือนเดิม หรือเปิดหน้าเดี่ยวที่ `/office3d/index.html`
+  ไฟล์โมเดล (`public/office3d/models/`) ไม่อยู่ใน git — คู่มือ + API + วิธีวาง/แปลงไฟล์: [docs/09-office3d.md](docs/09-office3d.md)
 
 ## สิ่งที่ทำได้
 
@@ -154,3 +156,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/01-grok-architecture.md](docs/01-grok-architecture.md) — Grok 4 Heavy, Grok 4.20 (4 agents), Agent Tools API, Grok Build, Macrohard และสิ่งที่เรานำมาใช้
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
+- [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo

@@ -70,6 +70,8 @@ function patchSection(t) {
 // ---------------------------------------------------------------------------
 const S = {
   mode: "sim",
+  view: "2d", // มุมมองฉาก: "2d" เมืองมอร็อค (scene.js) | "3d" ออฟฟิศ (office3d/ ใน iframe) — จำไว้ใน localStorage
+  sceneSel: null, // พนักงานที่ถูกเลือกอยู่ในฉาก 3 มิติ (กันคำสั่ง select ส่งวนไปมาระหว่างหน้าแม่กับ iframe)
   settings: { speed: 1 },
   agents: new Map(),
   tasks: new Map(),
@@ -399,7 +401,12 @@ function renderResults() {
 // Drawer (รายละเอียด + ควบคุม)
 // ---------------------------------------------------------------------------
 function openDrawer(type, id) { S.selected = { type, id }; renderDrawer(); }
-function closeDrawer() { S.selected = null; $("#drawer").classList.add("hidden"); }
+function closeDrawer() {
+  S.selected = null; $("#drawer").classList.add("hidden");
+  if (S.sceneSel) { S.sceneSel = null; office.send("select", null); } // เอาวงเลือกในฉาก 3 มิติออกด้วย
+}
+/** เปิด drawer ของพนักงานจากแผงรายชื่อ/การ์ด — ถ้าอยู่ในมุมมอง 3 มิติ ให้วงเลือกในฉากตามไปด้วย */
+function focusAgent(id) { openDrawer("agent", id); if (S.view === "3d") { S.sceneSel = id; office.send("select", id); } }
 
 function agentOptions(excludeId) {
   return [...S.agents.values()].filter((a) => a.role !== "captain" && a.id !== excludeId)
@@ -573,6 +580,44 @@ const burst = (id) => sc().burst(id);
 const layout = () => sc().layout();
 function frame() { if (dirty.size) flush(); requestAnimationFrame(frame); }
 
+// ---------------------------------------------------------------------------
+// ฉากออฟฟิศ 3 มิติ (public/office3d/ ใน iframe) — สลับกับฉากมอร็อค 2 มิติด้วยปุ่มมุมขวาบนของเวที
+// iframe ต่อ /api/events ของตัวเอง จึงไม่ต้องส่งสถานะเข้าไป; คุยกันด้วย postMessage (ดู docs/09-office3d.md §4):
+//   แม่ → ลูก {type:"office3d", cmd, args}   ลูก → แม่ {type:"office3d:ready"|"office3d:select", data}
+// ---------------------------------------------------------------------------
+const VIEW_KEY = "grock.view";
+const office = {
+  frame: $("#office3d"),
+  ready: false,
+  src: "office3d/index.html?embed=1&theme=dark", // embed=1 ซ่อนนาฬิกา/การ์ดข้อมูลของหน้าเดี่ยว (แดชบอร์ดแสดงเองใน drawer)
+  send(cmd, ...args) { if (this.ready && this.frame?.contentWindow) this.frame.contentWindow.postMessage({ type: "office3d", cmd, args }, location.origin); },
+};
+function setView(view, { save = true } = {}) {
+  view = view === "3d" ? "3d" : "2d";
+  S.view = view;
+  $("#stage").classList.toggle("view-3d", view === "3d");
+  document.querySelectorAll("#viewSwitch button").forEach((b) => { const on = b.dataset.view === view; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on); });
+  if (view === "3d" && office.frame && !office.frame.getAttribute("src")) office.frame.src = office.src; // โหลดฉาก 3 มิติ (โมเดล ~40 MB) เฉพาะเมื่อเลือกครั้งแรก
+  office.send("pause", view !== "3d"); // ซ่อนอยู่ = หยุดแอนิเมชันประหยัด GPU (เหตุการณ์ยังเข้าทาง SSE ของ iframe และเล่นต่อเมื่อสลับกลับ)
+  if (save) try { localStorage.setItem(VIEW_KEY, view); } catch {}
+}
+function initView() {
+  let v = "2d";
+  try { v = localStorage.getItem(VIEW_KEY) || "2d"; } catch {}
+  setView(v, { save: false });
+  $("#viewSwitch")?.addEventListener("click", (e) => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); });
+  window.addEventListener("message", (e) => {
+    if (!office.frame || e.source !== office.frame.contentWindow || e.origin !== location.origin) return; // รับเฉพาะจาก iframe ของเราเอง
+    const d = e.data || {};
+    if (d.type === "office3d:ready") { office.ready = true; office.send("pause", S.view !== "3d"); return; }
+    if (d.type === "office3d:select") { // ผู้ใช้แตะตัวละคร (หรือพื้นว่าง = null) ในฉาก 3 มิติ
+      const id = d.data?.agentId || null;
+      S.sceneSel = id;
+      if (id) { if (S.agents.has(id)) openDrawer("agent", id); } else closeDrawer();
+    }
+  });
+}
+
 const ZONE_LABEL = { plaza: "ลานกลางเมือง", gate: "ประตูเมือง", tower: "หอเวทมนตร์", library: "ห้องสมุด", forge: "โรงตีเหล็ก", temple: "วิหาร" };
 const JOB_BY_ROLE = { captain: "lord-knight", marketer: "sniper", researcher: "stalker", engineer: "high-wizard", finance: "professor", coder: "whitesmith", reviewer: "high-priest" };
 const jobIdOf = (a) => a.jobId || sc().jobOf(a) || JOB_BY_ROLE[a.role] || "_base";
@@ -706,7 +751,7 @@ document.addEventListener("click", (e) => {
   if (el.dataset.copytext) { navigator.clipboard?.writeText(el.dataset.copytext).then(() => toast("คัดลอกพาธแล้ว", "ok")); return; }
   if (el.dataset.copy) { const j = S.jobs.get(el.dataset.copy); navigator.clipboard?.writeText(j?.result || "").then(() => toast("คัดลอกผลลัพธ์แล้ว", "ok")); return; }
   const rosterRow = el.closest(".roster-row");
-  if (rosterRow) return openDrawer("agent", rosterRow.dataset.agent);
+  if (rosterRow) return focusAgent(rosterRow.dataset.agent);
   if (el.closest("#stripNew")) { $("#goalInput").focus(); return; }
   if (el.closest("#settingsBtn")) return openSettings();
   if (el.closest("[data-close-settings]") || el.id === "settings") return closeSettings();
@@ -724,7 +769,7 @@ document.addEventListener("click", (e) => {
     return act(api(`/api/agents/${row.dataset.cfg}/config`, body), (r) => toast(`บันทึกการตั้งค่า ${r.agent.name} แล้ว`, "ok"));
   }
   const agentCard = el.closest(".agent-card");
-  if (agentCard) return openDrawer("agent", agentCard.dataset.agent);
+  if (agentCard) return focusAgent(agentCard.dataset.agent);
   if (el.closest(".close")) return closeDrawer();
   if (el.dataset.pause) return act(api(`/api/agents/${el.dataset.pause}/pause`), () => {});
   if (el.dataset.resume) return act(api(`/api/agents/${el.dataset.resume}/resume`), () => {});
@@ -751,5 +796,6 @@ $("#roster").addEventListener("mouseover", (e) => { const r = e.target.closest("
 $("#roster").addEventListener("mouseleave", () => sc().setHover(null));
 
 initScene();
+initView();
 connect();
 requestAnimationFrame(frame);

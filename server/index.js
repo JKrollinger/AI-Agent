@@ -48,6 +48,7 @@ const MIME = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg", // office3d character textures
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
 };

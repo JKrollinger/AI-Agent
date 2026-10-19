@@ -15,3 +15,8 @@ public/sprites/png/map/*.jpg
 .claude/
 Thumbs.db
 .DS_Store
+
+# ออฟฟิศ 3 มิติ: โมเดลตัวละครจาก Mixamo (ไฟล์ใหญ่ ~5 MB ต่อคน + ลิขสิทธิ์ Adobe) ไม่เข้า git — ดู docs/09-office3d.md §5
+public/office3d/models/*
+!public/office3d/models/README.md
+tools/office3d/.bin/

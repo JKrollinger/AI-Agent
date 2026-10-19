@@ -40,6 +40,8 @@
     <section class="center">
       <section class="stage" id="stage">
         <canvas id="floor" aria-label="เมืองมอร็อค: แผนผังการทำงานของทีม AI แบบเรียลไทม์"></canvas>
+        <!-- ฉากออฟฟิศ 3 มิติ (public/office3d/) โหลดเมื่อเลือกมุมมอง 3D ครั้งแรก — app.js ตั้ง src และคุยด้วย postMessage -->
+        <iframe id="office3d" class="office3d" title="ออฟฟิศทีม AI 3 มิติ: ตัวละครเคลื่อนไหวตามสถานะงานจริง"></iframe>
         <div class="stage-overlay">
           <div class="legend">
             <span><i class="dot working"></i>กำลังทำงาน = ท่าใช้สกิล + HP bar</span>
@@ -48,9 +50,15 @@
             <span><i class="dot patch"></i>🩹 patch รออนุมัติ = Developer แก้ไฟล์จริง รอคุณกด Apply</span>
             <span class="hint">คลิกตัวละครเพื่อดูรายละเอียดและควบคุม</span>
           </div>
-          <div class="speed" id="speedCtl">
-            <label for="speedRange">ความเร็วจำลอง <b id="speedVal">1×</b></label>
-            <input type="range" id="speedRange" min="0.25" max="6" step="0.25" value="1" />
+          <div class="stage-tools">
+            <div class="view-switch" id="viewSwitch" role="group" aria-label="มุมมองฉาก">
+              <button type="button" data-view="2d" class="active" aria-pressed="true" title="เมืองมอร็อคไอโซเมตริก 2 มิติ (สไปรต์พิกเซล)">🏜️ มอร็อค 2D</button>
+              <button type="button" data-view="3d" aria-pressed="false" title="ออฟฟิศ 3 มิติ (three.js + ตัวละคร Mixamo) — แตะตัวละครเพื่อเปิดรายละเอียด">🏢 ออฟฟิศ 3D</button>
+            </div>
+            <div class="speed" id="speedCtl">
+              <label for="speedRange">ความเร็วจำลอง <b id="speedVal">1×</b></label>
+              <input type="range" id="speedRange" min="0.25" max="6" step="0.25" value="1" />
+            </div>
           </div>
         </div>
       </section>
