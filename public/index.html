@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Workforce Control Center · Morroc</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚔️</span>
+      <div>
+        <h1>AI Workforce Guild · Morroc</h1>
+        <div class="sub">
+          ศูนย์ควบคุมพนักงาน AI
+          <button id="modeBadge" class="badge mode" title="คลิกเพื่อสลับโหมด SIM / LIVE">SIM</button>
+          <span id="connBadge" class="badge conn">กำลังเชื่อมต่อ…</span>
+        </div>
+      </div>
+    </div>
+
+    <form id="jobForm" class="jobform" autocomplete="off">
+      <input id="goalInput" type="text" maxlength="2000" placeholder="พิมพ์โจทย์ที่ต้องการมอบหมายให้ทีม AI เช่น วางแผนนำ AI มาใช้ในฝ่ายบริการลูกค้าภายใน 90 วัน" />
+      <button type="submit" class="btn primary">มอบหมายงาน</button>
+      <button type="button" id="demoBtn" class="btn ghost">ลองงานตัวอย่าง</button>
+      <button type="button" id="settingsBtn" class="btn ghost" title="ตั้งค่าโมเดล/เครื่องมือต่อคน">⚙ ตั้งค่า AI</button>
+    </form>
+
+    <div class="kpis" id="kpis"></div>
+  </header>
+
+  <main class="layout">
+    <aside class="roster" id="roster"></aside>
+
+    <section class="center">
+      <section class="stage" id="stage">
+        <canvas id="floor" aria-label="เมืองมอร็อค: แผนผังการทำงานของทีม AI แบบเรียลไทม์"></canvas>
+        <div class="stage-overlay">
+          <div class="legend">
+            <span><i class="dot working"></i>กำลังทำงาน = ท่าใช้สกิล + HP bar</span>
+            <span><i class="dot paused"></i>นั่ง = หยุดชั่วคราว</span>
+            <span><i class="dot packet"></i>ม้วนงานบิน = มอบหมาย / ส่งต่อ</span>
+            <span class="hint">คลิกตัวละครเพื่อดูรายละเอียดและควบคุม</span>
+          </div>
+          <div class="speed" id="speedCtl">
+            <label for="speedRange">ความเร็วจำลอง <b id="speedVal">1×</b></label>
+            <input type="range" id="speedRange" min="0.25" max="6" step="0.25" value="1" />
+          </div>
+        </div>
+      </section>
+      <div class="strip-wrap">
+        <div class="strip-title">งานล่าสุด <span class="r-sub">ไทม์ไลน์: สั่งงาน → รับงาน → กำลังทำ → ตรวจ QA → เสร็จ</span></div>
+        <div class="strip" id="strip"></div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <nav class="tabs" id="tabs">
+        <button data-tab="tasks" class="active">งาน <span class="count" id="cntTasks"></span></button>
+        <button data-tab="metrics">ตัวชี้วัด</button>
+        <button data-tab="log">บันทึก</button>
+        <button data-tab="results">ผลงาน <span class="count" id="cntResults"></span></button>
+      </nav>
+      <div class="tab-body" id="tab-tasks"></div>
+      <div class="tab-body hidden" id="tab-metrics"></div>
+      <div class="tab-body hidden" id="tab-log"></div>
+      <div class="tab-body hidden" id="tab-results"></div>
+    </aside>
+  </main>
+
+  <div id="drawer" class="drawer hidden" role="dialog" aria-modal="false"></div>
+  <div id="settings" class="overlay hidden" role="dialog" aria-modal="true"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

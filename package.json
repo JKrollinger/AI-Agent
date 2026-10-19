@@ -1,0 +1,17 @@
+{
+  "name": "ai-workforce-control-center",
+  "version": "0.1.0",
+  "description": "ศูนย์ควบคุมพนักงาน AI — multi-agent orchestrator + real-time animated dashboard (แรงบันดาลใจจาก Grok 4.20 / Grok Build / Macrohard)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js"
+  },
+  "engines": {
+    "node": ">=22.9"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "image": "morroc.png",
+  "fit": "contain",
+  "charScale": 1,
+  "spots": {
+    "lord-knight": [0.50, 0.56],
+    "sniper": [0.30, 0.80],
+    "stalker": [0.40, 0.86],
+    "high-wizard": [0.78, 0.36],
+    "professor": [0.76, 0.70],
+    "whitesmith": [0.22, 0.40],
+    "high-priest": [0.52, 0.24]
+  },
+  "zones": {
+    "plaza": [0.50, 0.47],
+    "gate": [0.33, 0.92],
+    "tower": [0.80, 0.28],
+    "library": [0.78, 0.62],
+    "forge": [0.20, 0.32],
+    "temple": [0.52, 0.16]
+  },
+  "spare": [[0.2, 0.95], [0.6, 0.95], [0.9, 0.9]]
+}

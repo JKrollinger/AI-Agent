@@ -1,0 +1,17 @@
+node_modules/
+.env
+logs/
+
+# ข้อมูลเฉพาะเครื่อง / ไฟล์ใหญ่ / ภาพจากเกม (ส่งให้เพื่อนแยกต่างหากถ้าต้องการ)
+data/
+samples/
+tools/out/
+public/sprites/png/*/
+!public/sprites/png/map/
+public/sprites/png/map/*.png
+public/sprites/png/map/*.jpg
+
+# ระบบ/เครื่องมือ
+.claude/
+Thumbs.db
+.DS_Store

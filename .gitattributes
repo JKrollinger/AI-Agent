@@ -1,0 +1,5 @@
+# ให้ไฟล์ข้อความใช้ LF ใน repo (ทำงานได้ทั้ง Windows/Mac/Linux)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary

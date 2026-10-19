@@ -1,0 +1,187 @@
+// index.js — HTTP server: หน้าเว็บ dashboard + REST API + SSE (เหตุการณ์เรียลไทม์)
+// ไม่ใช้ framework ภายนอก (Node >= 22) เพื่อให้อ่าน/ดัดแปลงง่าย
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { bus } from "./bus.js";
+import { state, snapshot } from "./state.js";
+import * as orch from "./orchestrator.js";
+import { liveAvailable } from "./llm.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(here, "..", "public");
+const PORT = Number(process.env.PORT || 3789);
+const HOST = process.env.HOST || "127.0.0.1";
+
+// เลือกโหมดเริ่มต้น: MODE=live|sim|auto (auto = live ถ้ามี key, ไม่งั้น sim)
+const MODE = (process.env.MODE || "auto").toLowerCase();
+state.mode = MODE === "live" ? "live" : MODE === "sim" ? "sim" : liveAvailable() ? "live" : "sim";
+
+const DEMO_GOALS = [
+  "วางแผนนำ AI มาใช้ในฝ่ายบริการลูกค้าขององค์กรภายใน 90 วัน พร้อมตัวชี้วัดความสำเร็จ",
+  "ออกแบบระบบ dashboard ติดตามยอดขายรายวันสำหรับร้านค้าออนไลน์ พร้อมต้นแบบโค้ด",
+  "จัดทำข้อเสนอโครงการลดต้นทุนพลังงานในโรงงานขนาดกลาง",
+  "สร้างแผนการตลาดเปิดตัวแอปสั่งอาหารสำหรับพนักงานออฟฟิศในกรุงเทพฯ",
+  "เขียนสคริปต์อัตโนมัติสรุปอีเมลลูกค้าประจำวันและจัดลำดับความเร่งด่วน",
+];
+let demoIndex = 0;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
+
+function sendJson(res, status, data) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(body);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > 1_000_000) {
+        reject(new orch.HttpError(413, "body ใหญ่เกินไป"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (!data) return resolve({});
+      try {
+        resolve(JSON.parse(data));
+      } catch {
+        reject(new orch.HttpError(400, "JSON ไม่ถูกต้อง"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function serveStatic(req, res, pathname) {
+  const rel = pathname === "/" ? "/index.html" : pathname;
+  const file = path.normalize(path.join(PUBLIC_DIR, rel));
+  if (!file.startsWith(PUBLIC_DIR)) return sendJson(res, 403, { error: "forbidden" });
+  fs.readFile(file, (err, data) => {
+    if (err) return sendJson(res, 404, { error: "ไม่พบไฟล์" });
+    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-cache" });
+    res.end(data);
+  });
+}
+
+// ---------- SSE ----------
+const sseClients = new Set();
+function handleSse(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  const send = (event) => res.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+  // ส่ง snapshot ทั้งระบบก่อน แล้วตามด้วย log ย้อนหลัง
+  send({ id: 0, ts: Date.now(), type: "snapshot", data: snapshot() });
+  send({ id: 0, ts: Date.now(), type: "log.history", data: { events: bus.recent(400).filter((e) => e.type === "log") } });
+  const listener = (event) => send(event);
+  bus.on("event", listener);
+  sseClients.add(res);
+  const heartbeat = setInterval(() => res.write(`: ping ${Date.now()}\n\n`), 15000);
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    bus.off("event", listener);
+    sseClients.delete(res);
+  });
+}
+
+// ---------- Router ----------
+async function handleApi(req, res, url) {
+  const { pathname } = url;
+  const m = req.method;
+  const seg = pathname.split("/").filter(Boolean); // ["api", ...]
+
+  if (m === "GET" && pathname === "/api/state") return sendJson(res, 200, snapshot());
+  if (m === "GET" && pathname === "/api/events") return handleSse(req, res);
+  if (m === "GET" && pathname === "/api/logs") {
+    const limit = Number(url.searchParams.get("limit") || 200);
+    return sendJson(res, 200, { events: bus.recent(limit).filter((e) => e.type === "log") });
+  }
+  if (m === "GET" && pathname === "/api/health") {
+    return sendJson(res, 200, { ok: true, mode: state.mode, liveAvailable: liveAvailable(), clients: sseClients.size, uptimeMs: Date.now() - state.startedAt });
+  }
+
+  if (m === "POST" && pathname === "/api/jobs") {
+    const body = await readBody(req);
+    const job = await orch.submitJob(body.goal);
+    return sendJson(res, 201, { job });
+  }
+  if (m === "POST" && pathname === "/api/demo") {
+    const goal = DEMO_GOALS[demoIndex++ % DEMO_GOALS.length];
+    const job = await orch.submitJob(goal);
+    return sendJson(res, 201, { job });
+  }
+  if (m === "POST" && seg[1] === "tasks" && seg[2] && seg[3]) {
+    const body = await readBody(req);
+    const id = decodeURIComponent(seg[2]);
+    if (seg[3] === "handoff") return sendJson(res, 200, { task: orch.handoff(id, body.agentId, body.reason) });
+    if (seg[3] === "retry") return sendJson(res, 200, { task: orch.retryTask(id) });
+    if (seg[3] === "cancel") return sendJson(res, 200, { task: orch.cancelTask(id) });
+  }
+  if (m === "POST" && seg[1] === "agents" && seg[2] && seg[3]) {
+    const id = decodeURIComponent(seg[2]);
+    if (seg[3] === "pause") return sendJson(res, 200, { agent: orch.pauseAgent(id) });
+    if (seg[3] === "resume") return sendJson(res, 200, { agent: orch.resumeAgent(id) });
+    if (seg[3] === "config") {
+      const body = await readBody(req);
+      return sendJson(res, 200, { agent: orch.configureAgent(id, body) });
+    }
+  }
+  if (m === "POST" && pathname === "/api/settings") {
+    const body = await readBody(req);
+    return sendJson(res, 200, { settings: orch.updateSettings(body) });
+  }
+  if (m === "POST" && pathname === "/api/mode") {
+    const body = await readBody(req);
+    return sendJson(res, 200, { mode: orch.setMode(body.mode) });
+  }
+  return sendJson(res, 404, { error: "ไม่พบ endpoint" });
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  try {
+    if (url.pathname.startsWith("/api/")) return await handleApi(req, res, url);
+    if (req.method !== "GET") return sendJson(res, 405, { error: "method not allowed" });
+    return serveStatic(req, res, url.pathname);
+  } catch (err) {
+    const status = err instanceof orch.HttpError ? err.status : 500;
+    if (status === 500) console.error(err);
+    return sendJson(res, status, { error: err.message || "เกิดข้อผิดพลาด" });
+  }
+});
+
+// ตัวจัดคิวเดินทุก 500ms กันกรณีมีงานค้าง + ส่งตัวชี้วัดสดทุก 2 วินาที
+setInterval(() => orch.tick(), 500);
+setInterval(() => {
+  if (!sseClients.size) return;
+  const snap = snapshot();
+  bus.publish("metrics.updated", {
+    totals: snap.totals,
+    agents: snap.agents.map((a) => ({ id: a.id, status: a.status, metrics: a.metrics, computed: a.computed })),
+  });
+}, 2000);
+
+server.listen(PORT, HOST, () => {
+  const modeLabel = state.mode === "live" ? "LIVE (เรียก Claude จริง)" : "SIM (จำลอง — ตั้ง ANTHROPIC_API_KEY ใน .env เพื่อใช้โมเดลจริง)";
+  console.log(`\n🧭 AI Workforce Control Center`);
+  console.log(`   เปิดหน้าควบคุม: http://${HOST}:${PORT}`);
+  console.log(`   โหมด: ${modeLabel}\n`);
+  bus.log(`🚀 ระบบเริ่มทำงานในโหมด ${state.mode.toUpperCase()}`);
+});
