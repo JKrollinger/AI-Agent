@@ -1,7 +1,7 @@
 {
   "image": "morroc.png",
   "fit": "contain",
-  "charScale": 0.6,
+  "charScale": 0.9,
   "spots": {
     "lord-knight": [0.455, 0.51],
     "sniper": [0.42, 0.23],

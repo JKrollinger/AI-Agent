@@ -5,7 +5,7 @@
 ## 1. แนวคิดหลัก: องค์กร = ทีมพนักงาน AI ที่มีกัปตันประสานงาน
 
 ```
-ผู้ใช้ (มนุษย์) ──โจทย์──▶ กัปตัน ──แตกงาน/มอบหมาย──▶ นักวิจัย ×2, นักวิเคราะห์, นักพัฒนา, นักเขียน, QA
+ผู้ใช้ (มนุษย์) ──โจทย์──▶ กัปตัน (PM) ──แตกงาน/มอบหมาย──▶ นักการตลาด, นักวิจัย, นักการเงิน/กลยุทธ์, วิศวกร AI, นักพัฒนา, QA & Compliance
                             ▲                                   │
                             └────────── ส่งผลงานกลับ ◀──────────┘
                                    QA ไม่ผ่าน → ส่งกลับให้คนเดิมแก้ (handoff)
@@ -160,7 +160,7 @@ llm.onTool → executor.onProgress({ phase, tool, toolStarted }) → orchestrato
 
 | ด้าน | ต้นแบบนี้ | แนวทางขยาย |
 |---|---|---|
-| ตำแหน่ง/ทีม | 6 ตำแหน่งใน `DEFAULT_TEAM` | ย้ายไปไฟล์/ฐานข้อมูล, เพิ่มตำแหน่งตามแผนก (ขาย, บัญชี, HR), หลายคนต่อตำแหน่ง |
+| ตำแหน่ง/ทีม | 7 อาชีพใน `DEFAULT_TEAM` (captain, marketer, researcher, finance, engineer, coder, reviewer) + คู่มือทักษะ `server/skills/<role>.md` | ย้ายไปไฟล์/ฐานข้อมูล, เพิ่มตำแหน่งตามแผนก (ขาย, บัญชี, HR), หลายคนต่อตำแหน่ง |
 | เครื่องมือ | server tools ของ Claude ต่อตำแหน่ง (web search, web fetch, code execution) | เพิ่ม MCP connector เชื่อมระบบภายใน (ERP, CRM, ไฟล์) และ custom tools ที่รันฝั่งเรา (ต้องเพิ่ม tool loop / tool runner) |
 | ความจำ | บริบทต่อโจทย์ | เพิ่ม memory store / RAG ของความรู้องค์กร |
 | คิวงาน | in-memory, 1 process | Redis/BullMQ หรือ Vercel Queues; หลาย worker process |
@@ -169,6 +169,13 @@ llm.onTool → executor.onProgress({ phase, tool, toolStarted }) → orchestrato
 | สังเกตการณ์ | SSE + JSONL | ส่ง OpenTelemetry traces/metrics เข้า Grafana/Datadog |
 | สภา/debate | QA 1 คน | เพิ่ม reviewer หลายคนให้คะแนนแล้วเฉลี่ย หรือให้ 2 agent ทำคู่ขนานแล้วกัปตันเลือก (แบบ Grok Heavy) |
 | ความปลอดภัย | localhost | auth, rate limit, แยก sandbox ต่อ agent เมื่อให้รันโค้ด |
+
+## 12. คู่มือทักษะต่อตำแหน่ง (server/skills/)
+
+แต่ละตำแหน่งมีไฟล์ `server/skills/<role>.md` (captain, marketer, researcher, finance, engineer, coder, reviewer) เก็บ **หน้าที่หลัก ขั้นตอนทำงาน รูปแบบผลงาน เกณฑ์คุณภาพ และข้อห้าม**
+แนวคิดเดียวกับ SKILL.md ของ Agent Skills แต่เป็นของระบบนี้เอง: `server/skills.js` โหลดไฟล์ (ไม่เกิน 6,000 ตัวอักษร) แล้ว `executor.js` ต่อท้าย system prompt ของคนในตำแหน่งนั้นในโหมด LIVE
+ลำดับใน system prompt: prompt ประจำตำแหน่ง → หน้าที่ของคนนั้น (duties) → คู่มือทักษะ → คำแนะนำเครื่องมือ
+แก้ไฟล์แล้วรีสตาร์ตเซิร์ฟเวอร์ (หรือเรียก `reloadSkills()`) ไม่ต้องแตะโค้ด โหมด sim ไม่ใช้ไฟล์นี้
 
 ## 11. หน้าที่ต่อคน (duties) และการมอบหมายตามหน้าที่
 

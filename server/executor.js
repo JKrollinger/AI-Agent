@@ -4,11 +4,12 @@
 //   sim  : จำลองการทำงานเป็นเฟส ๆ พร้อมข้อความค่อย ๆ พิมพ์ออกมา เพื่อให้เห็นภาพการทำงานบน dashboard ได้ทันที
 import { ROLES, CAPTAIN_MODEL, TOOL_META, estimateCost, toolsFor, toolHintFor } from "./agents.js";
 import { state, workers, captain } from "./state.js";
+import { skillFor } from "./skills.js";
 import * as llm from "./llm.js";
 
 export const isLive = () => state.mode === "live";
 
-const VALID_ROLES = ["researcher", "analyst", "writer", "coder", "reviewer"];
+const VALID_ROLES = ["marketer", "researcher", "finance", "engineer", "coder", "reviewer"];
 const MAX_PLAN_TASKS = 8;
 
 // ---------- utilities ----------
@@ -132,7 +133,7 @@ function planPrompt(goal, roster = rosterFor()) {
 ทีมของคุณและหน้าที่ของแต่ละคน:
 ${rosterText(roster)}
 
-แตกโจทย์นี้เป็นงานย่อย 3-7 ชิ้นสำหรับทีม ซึ่งมีตำแหน่ง: researcher (นักวิจัย), analyst (นักวิเคราะห์), writer (นักเขียน), coder (นักพัฒนา), reviewer (QA)
+แตกโจทย์นี้เป็นงานย่อย 3-7 ชิ้นสำหรับทีม ซึ่งมีตำแหน่ง: marketer (นักการตลาด), researcher (นักวิจัย), finance (นักการเงินและกลยุทธ์ รวมถึงเรียบเรียงข้อเสนอสำหรับผู้บริหาร), engineer (วิศวกร AI ออกแบบโซลูชัน AI/prompt), coder (นักพัฒนาและระบบอัตโนมัติ), reviewer (QA & Compliance)
 กติกา:
 - ทุกงานต้องระบุ assignee เป็น id ของคนที่หน้าที่ตรงกับงานนั้นที่สุด (ตำแหน่งต้องตรงกับ role) ถ้าตำแหน่งเดียวกันมีหลายคน ให้แบ่งงานตามหน้าที่ที่แต่ละคนรับผิดชอบ ไม่ให้งานกองอยู่ที่คนเดียว
 - งานต้องเป็นลำดับที่สมเหตุสมผล ระบุ depends_on เป็น index ของงานก่อนหน้าเท่านั้น (ห้ามอ้างงานที่อยู่ถัดไป)
@@ -147,11 +148,13 @@ export function normalizePlan(rawTasks, roster = rosterFor()) {
   const load = new Map(); // งานที่แต่ละคนได้รับในแผนนี้ (ใช้กระจายงานเมื่อหน้าที่ไม่ชี้ชัด)
   let tasks = (Array.isArray(rawTasks) ? rawTasks : []).slice(0, MAX_PLAN_TASKS).map((t, i) => {
     let role = String(t.role || "").toLowerCase();
-    if (/qa|review|ตรวจ/.test(role)) role = "reviewer";
+    if (/qa|review|ตรวจ|compliance/.test(role)) role = "reviewer";
+    if (/market|การตลาด|โฆษณา|content|brand/.test(role)) role = "marketer";
     if (/research|วิจัย|ค้น/.test(role)) role = "researcher";
-    if (/analy|วิเคราะห์/.test(role)) role = "analyst";
-    if (/code|dev|engineer|พัฒนา|โปรแกรม/.test(role)) role = "coder";
-    if (!VALID_ROLES.includes(role)) role = "writer";
+    if (/analy|วิเคราะห์|financ|การเงิน|strateg|กลยุทธ์|writ|เขียน|เอกสาร/.test(role)) role = "finance";
+    if (/\bai\b|ml|llm|model|prompt|engineer|วิศวกร/.test(role)) role = "engineer";
+    if (/code|dev|พัฒนา|โปรแกรม|automation|อัตโนมัติ/.test(role)) role = "coder";
+    if (!VALID_ROLES.includes(role)) role = "researcher";
     const deps = [...new Set((t.depends_on || t.dependsOn || []).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d < i))];
     const title = shorten(String(t.title || `งานที่ ${i + 1}`), 70);
     const description = String(t.description || t.title || "");
@@ -214,19 +217,26 @@ async function simPlan(job, onPhase, signal, roster = rosterFor()) {
     await sleep(rand(600, 1100) / speed(), signal);
   }
   const s = shorten(goal, 36);
+  const wantsAI = /\bai\b|เอไอ|ปัญญาประดิษฐ์|llm|chatbot|แชตบอท|แชทบอท|automation|อัตโนมัติ|model|โมเดล|agent|เอเจนต์/i.test(goal);
   const tasks = [
-    { title: `ค้นข้อมูลพื้นฐาน: ${s}`, role: "researcher", dependsOn: [], description: `รวบรวมข้อเท็จจริง นิยาม สถานการณ์ปัจจุบัน และแหล่งอ้างอิงเกี่ยวกับ "${goal}"` },
-    { title: `สำรวจตัวอย่างและคู่เทียบ`, role: "researcher", dependsOn: [], description: `หาตัวอย่างการทำจริง คู่เทียบ และบทเรียนที่เกี่ยวกับ "${goal}"` },
-    { title: `วิเคราะห์และสรุป insight`, role: "analyst", dependsOn: [0, 1], description: `นำข้อมูลจากนักวิจัยทั้งสองคนมาวิเคราะห์ เปรียบเทียบตัวเลือก และสรุปข้อเสนอแนะ` },
+    { title: `ค้นข้อมูลพื้นฐาน: ${s}`, role: "researcher", dependsOn: [], description: `รวบรวมข้อเท็จจริง นิยาม สถานการณ์ปัจจุบัน สถิติ กฎระเบียบ และแหล่งอ้างอิงเกี่ยวกับ "${goal}"` },
+    { title: `วิเคราะห์ตลาดและคู่แข่ง`, role: "marketer", dependsOn: [], description: `สำรวจกลุ่มเป้าหมาย คู่แข่ง จุดขาย และแนวทางสื่อสารที่เกี่ยวกับ "${goal}"` },
+    { title: `วิเคราะห์การเงินและกลยุทธ์`, role: "finance", dependsOn: [0, 1], description: `นำข้อมูลวิจัยและการตลาดมาวิเคราะห์ต้นทุน ผลตอบแทน ความเสี่ยง และเปรียบเทียบทางเลือก` },
   ];
-  if (wantsCode) {
-    tasks.push({ title: `สร้างต้นแบบ (prototype)`, role: "coder", dependsOn: [2], description: `ออกแบบและเขียนโค้ดต้นแบบตามข้อเสนอของนักวิเคราะห์ พร้อมคู่มือใช้งาน` });
-    tasks.push({ title: `ตรวจสอบโค้ดต้นแบบ`, role: "reviewer", dependsOn: [3], reviewOf: 3, description: `ตรวจความถูกต้อง ความปลอดภัย และความพร้อมใช้งานของต้นแบบ` });
+  let last = 2;
+  if (wantsAI) {
+    tasks.push({ title: `ออกแบบโซลูชัน AI`, role: "engineer", dependsOn: [last], description: `ออกแบบแนวทาง AI/LLM, prompt, การประเมินผล และต้นทุนโทเคนสำหรับโจทย์นี้` });
+    last = tasks.length - 1;
   }
-  const writerDeps = wantsCode ? [2, 4] : [2];
-  tasks.push({ title: `เรียบเรียงเอกสารข้อเสนอ`, role: "writer", dependsOn: writerDeps, description: `เรียบเรียงผลงานทั้งหมดเป็นเอกสารข้อเสนอสำหรับผู้บริหาร` });
+  if (wantsCode) {
+    tasks.push({ title: `สร้างต้นแบบ (prototype)`, role: "coder", dependsOn: [last], description: `เขียนโค้ดต้นแบบตามข้อเสนอของทีม พร้อมคู่มือใช้งาน และทดสอบว่ารันได้จริง` });
+    const c = tasks.length - 1;
+    tasks.push({ title: `ตรวจสอบโค้ดต้นแบบ`, role: "reviewer", dependsOn: [c], reviewOf: c, description: `ตรวจความถูกต้อง ความปลอดภัย และความพร้อมใช้งานของต้นแบบ` });
+    last = tasks.length - 1;
+  }
+  tasks.push({ title: `เรียบเรียงข้อเสนอสำหรับผู้บริหาร`, role: "finance", dependsOn: [...new Set([2, last])], description: `เรียบเรียงผลงานทั้งหมดเป็นเอกสารข้อเสนอสำหรับผู้บริหาร พร้อมบทสรุปและขั้นตอนถัดไป` });
   const w = tasks.length - 1;
-  tasks.push({ title: `ตรวจคุณภาพเอกสารข้อเสนอ`, role: "reviewer", dependsOn: [w], reviewOf: w, description: `ตรวจความครบถ้วน ความถูกต้อง และความพร้อมส่งมอบของเอกสาร` });
+  tasks.push({ title: `ตรวจคุณภาพเอกสารข้อเสนอ`, role: "reviewer", dependsOn: [w], reviewOf: w, description: `ตรวจความครบถ้วน ความถูกต้อง การปฏิบัติตามกฎ และความพร้อมส่งมอบของเอกสาร` });
   // กัปตัน (จำลอง) เลือกคนตามหน้าที่ เช่น งานค้นข้อมูลพื้นฐาน → คนที่หน้าที่ระบุ "ค้นข้อมูลพื้นฐาน", งานคู่เทียบ → คนที่หน้าที่ระบุ "คู่เทียบ"
   const load = new Map();
   for (const t of tasks) t.assignee = suggestAssignee(t.role, `${t.title} ${t.description}`, roster, load);
@@ -236,7 +246,8 @@ async function simPlan(job, onPhase, signal, roster = rosterFor()) {
 /** system prompt ของกัปตัน + หน้าที่ที่ผู้ใช้กำหนด */
 function captainSystem() {
   const cap = captain();
-  return cap?.duties ? `${ROLES.captain.system}\n\nหน้าที่ประจำของคุณ: ${cap.duties}` : ROLES.captain.system;
+  const skill = skillFor("captain");
+  return `${ROLES.captain.system}${cap?.duties ? `\n\nหน้าที่ประจำของคุณ: ${cap.duties}` : ""}${skill ? `\n\n[คู่มือทักษะประจำตำแหน่ง]\n${skill}` : ""}`;
 }
 
 export async function planJob(job, { onPhase, signal } = {}) {
@@ -268,6 +279,9 @@ const SIM_PHASES = {
   writer: ["กำลังวางโครงเรื่อง (Memorize)", "กำลังร่างเนื้อหา (Double Casting)", "กำลังปรับภาษา (Dispel)", "กำลังจัดรูปแบบเอกสาร (Land Protector)"],
   coder: ["กำลังออกแบบโครงสร้าง (Weapon Perfection)", "กำลังเขียนโค้ด (Mammonite)", "กำลังทดสอบ (Weapon Refine)", "กำลังเขียนคู่มือใช้งาน (Cart Boost)"],
   reviewer: ["กำลังอ่านผลงาน (Lex Aeterna)", "กำลังตรวจตามเกณฑ์ (Assumptio)", "กำลังให้คะแนน (Magnificat)", "กำลังเขียน feedback (Blessing)"],
+  marketer: ["กำลังสำรวจตลาด (Falcon Eyes)", "กำลังส่องคู่แข่ง (Double Strafe)", "กำลังเล็งกลุ่มเป้าหมาย (True Sight)", "กำลังเขียนแผนการตลาด (Sharp Shooting)"],
+  finance: ["กำลังตั้งสมมติฐาน (Memorize)", "กำลังคำนวณตัวเลข (Double Casting)", "กำลังประเมินความเสี่ยง (Dispel)", "กำลังเรียบเรียงข้อเสนอ (Land Protector)"],
+  engineer: ["กำลังรวบรวมความต้องการ (Storm Gust)", "กำลังออกแบบสถาปัตยกรรม AI (Meteor Storm)", "กำลังร่าง prompt และการประเมิน (Jupitel Thunder)", "กำลังประเมินต้นทุน (Mystical Amplification)"],
 };
 // สกิลของ Stalker (นักวิจัยคนที่ 2) ต่างจาก Sniper
 const SIM_PHASES_BY_JOB = {
@@ -291,7 +305,14 @@ function simToolPhases(role, context, agent) {
       },
       { after: 1, tool: "web_fetch", chance: 0.65, summary: () => pick(sites), result: (s) => `อ่าน ${s} แล้ว` },
     ],
-    analyst: [
+    marketer: [
+      { after: 0, tool: "web_search", chance: 1, summary: () => pick([`${topic} คู่แข่ง`, `${topic} ราคา`, `${topic} เทรนด์ 2026`]), result: () => `พบผลค้นหา ${Math.round(rand(4, 10))} รายการ` },
+      { after: 1, tool: "web_fetch", chance: 0.6, summary: () => pick(sites), result: (s) => `อ่าน ${s} แล้ว` },
+    ],
+    engineer: [
+      { after: 2, tool: "bash_code_execution", chance: 0.6, summary: () => pick(["python estimate_tokens.py", "python eval_prompt.py --cases 12"]), result: () => "รันโค้ดสำเร็จ" },
+    ],
+    finance: [
       {
         after: 1,
         tool: "bash_code_execution",
@@ -360,7 +381,7 @@ const workRole = (agent, task) => (ROLES[task.role] ? task.role : agent.role);
 
 async function liveRun({ agent, task, context, signal, onProgress }) {
   const role = workRole(agent, task);
-  const roleDef = ROLES[role] || ROLES.writer;
+  const roleDef = ROLES[role] || ROLES.researcher;
   const isReview = role === "reviewer";
   const effort = agent.effort || (role === "coder" ? "high" : "medium");
   const expectedChars = isReview ? 900 : 3200;
@@ -370,11 +391,14 @@ async function liveRun({ agent, task, context, signal, onProgress }) {
   // หน้าที่ประจำของคนนี้ (ผู้ใช้กำหนดได้) ต่อท้าย system prompt ประจำตำแหน่ง
   const who = agent.nick && agent.nick !== agent.name ? `${agent.name} (${agent.nick})` : agent.name;
   const dutyLine = agent.duties ? `\n\nคุณคือ ${who} หน้าที่ประจำของคุณในทีม: ${agent.duties}\nทำงานชิ้นนี้ตามขอบเขตหน้าที่ของคุณ และถ้างานเกินหน้าที่ให้ทำเท่าที่ทำได้พร้อมระบุส่วนที่ควรส่งต่อให้คนอื่น` : "";
+  // คู่มือทักษะประจำตำแหน่งจาก server/skills/<role>.md (ขั้นตอน เกณฑ์คุณภาพ รูปแบบผลงาน)
+  const skill = skillFor(role);
+  const skillBlock = skill ? `\n\n[คู่มือทักษะประจำตำแหน่ง]\n${skill}` : "";
   let lastPhase = "กำลังคิด";
   let toolCalls = 0;
   const { text, usage, model } = await llm.streamText({
     model: agent.model,
-    system: `${roleDef.system}${dutyLine}${toolHint ? `\n\n${toolHint}` : ""}`,
+    system: `${roleDef.system}${dutyLine}${skillBlock}${toolHint ? `\n\n${toolHint}` : ""}`,
     prompt: isReview ? reviewPrompt(task, context) : taskPrompt(task, context),
     effort,
     maxTokens: 16000,
@@ -440,8 +464,8 @@ function simOutput(agent, task, context) {
 
 ## แหล่งอ้างอิงที่ควรตรวจสอบต่อ
 - รายงานอุตสาหกรรมล่าสุด, กรณีศึกษาจากองค์กรขนาดใกล้เคียง, มาตรฐาน/ข้อกำหนดที่เกี่ยวข้อง`;
-    case "analyst":
-      return `# บทวิเคราะห์: ${task.title}
+    case "finance":
+      return `# บทวิเคราะห์การเงินและกลยุทธ์: ${task.title}
 
 อ้างอิงข้อมูลจาก ${refs || "ทีมวิจัย"}
 
@@ -461,8 +485,8 @@ function simOutput(agent, task, context) {
 1. เริ่ม pilot กับทีมเดียวภายใน 30 วัน
 2. ตั้ง dashboard ติดตามตัวชี้วัดตั้งแต่วันแรก
 3. ทบทวนผลทุก 2 สัปดาห์และตัดสินใจขยาย/หยุด`;
-    case "writer":
-      return `# ข้อเสนอ: ${g}
+    case "marketer":
+      return `# แผนการตลาด: ${g}
 
 ## บทสรุปผู้บริหาร
 เอกสารนี้เรียบเรียงจากผลงานของทีม (${refs || "วิจัยและวิเคราะห์"}) เพื่อเสนอแนวทางดำเนินการเรื่อง "${g}" โดยแนะนำให้เริ่มจากโครงการนำร่องขนาดเล็กที่วัดผลได้ภายใน 30 วัน
@@ -518,6 +542,26 @@ http.createServer((req, res) => {
 ## ข้อจำกัด / สิ่งที่ควรทำต่อ
 - ยังเก็บข้อมูลในหน่วยความจำ ควรต่อฐานข้อมูลจริง
 - ยังไม่มีการยืนยันตัวตน (auth)`;
+    case "engineer":
+      return `# แนวทางโซลูชัน AI: ${task.title}
+
+## แนวทางที่เลือก
+ใช้ LLM แบบ prompt + retrieval (RAG) เพราะโจทย์ "${g}" ต้องอิงข้อมูลขององค์กร ไม่จำเป็นต้อง fine-tune
+
+## สถาปัตยกรรม
+1. รับคำขอ → ค้นเอกสารที่เกี่ยวข้อง 3-5 ชิ้น
+2. ประกอบ prompt (system + บริบท + คำขอ) → เรียกโมเดล
+3. ตรวจผลลัพธ์ตาม schema → ส่งกลับพร้อมแหล่งอ้างอิง
+
+## การประเมินผล
+- ชุดทดสอบ 15 กรณี (ปกติ 8 / ยาก 5 / ไม่ควรตอบ 2) เกณฑ์ผ่าน 80%
+- ตรวจ hallucination ด้วยการเทียบกับเอกสารต้นทาง
+
+## ต้นทุนโดยประมาณ
+- ~3,000 โทเคนเข้า / 600 โทเคนออก ต่อคำขอ ≈ 0.012 ดอลลาร์ (Sonnet)
+
+## สิ่งที่ส่งต่อให้นักพัฒนา
+- schema ผลลัพธ์, prompt ตัวอย่าง, รายการเอกสารที่ต้องทำดัชนี`;
     default:
       return `ผลงานสำหรับ "${task.title}" ภายใต้โจทย์ "${g}"`;
   }
@@ -551,7 +595,7 @@ function simReview(context) {
 
 async function simRun({ agent, task, context, signal, onProgress }) {
   const role = workRole(agent, task);
-  const phases = (role === agent.role && SIM_PHASES_BY_JOB[agent.jobId]) || SIM_PHASES[role] || SIM_PHASES.writer;
+  const phases = (role === agent.role && SIM_PHASES_BY_JOB[agent.jobId]) || SIM_PHASES[role] || SIM_PHASES.researcher;
   const toolPhases = simToolPhases(role, context, agent);
   const output = role === "reviewer" ? "" : simOutput({ ...agent, role }, task, context);
   const review = role === "reviewer" ? simReview(context) : null;

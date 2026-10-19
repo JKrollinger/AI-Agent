@@ -357,7 +357,7 @@ function renderDrawer() {
     const live = S.live.get(a.id) || a.lastOutput || "";
     const mine = [...S.tasks.values()].filter((t) => t.assignedTo === a.id || t.history?.some((h) => h.agentId === a.id)).sort((a2, b2) => b2.createdAt - a2.createdAt).slice(0, 6);
     html = `<div class="d-head"><div class="avatar" style="border-color:${a.color}">${avatarHtml(a, 30)}</div>
-        <div><h2>${esc(a.name)}</h2><div class="role">${a.nick && a.nick !== a.name ? `${esc(a.nick)} · ` : ""}${esc(a.roleLabel)}${a.jobTh ? ` (${esc(a.jobTh)})` : ""} · ${esc(a.model)}</div></div>
+        <div><h2>${esc(a.name)}</h2><div class="role">${esc(a.roleLabel)}${a.jobTh ? ` (${esc(a.jobTh)})` : ""} · ${esc(a.model)}</div></div>
         <span class="chip ${a.status === "working" ? "running" : a.status === "paused" ? "review" : ""}" style="margin-left:auto">${STATUS_TH[a.status]}</span>
         <button class="close" title="ปิด">×</button></div>
       <div class="d-body">
@@ -500,7 +500,7 @@ const layout = () => sc().layout();
 function frame() { if (dirty.size) flush(); requestAnimationFrame(frame); }
 
 const ZONE_LABEL = { plaza: "ลานกลางเมือง", gate: "ประตูเมือง", tower: "หอเวทมนตร์", library: "ห้องสมุด", forge: "โรงตีเหล็ก", temple: "วิหาร" };
-const JOB_BY_ROLE = { captain: "lord-knight", analyst: "high-wizard", writer: "professor", coder: "whitesmith", reviewer: "high-priest", researcher: "sniper" };
+const JOB_BY_ROLE = { captain: "lord-knight", marketer: "sniper", researcher: "stalker", engineer: "high-wizard", finance: "professor", coder: "whitesmith", reviewer: "high-priest" };
 const jobIdOf = (a) => a.jobId || sc().jobOf(a) || JOB_BY_ROLE[a.role] || "_base";
 /** รูปตัวละคร (data URL จากสไปรต์) ใช้ใน roster/การ์ด/drawer — fallback อีโมจิ */
 function avatarHtml(a, h = 36) {
@@ -530,8 +530,8 @@ function renderRoster() {
       return `<div class="roster-row ${a.status}" data-agent="${a.id}">
         <div class="r-avatar">${avatarHtml(a, 40)}</div>
         <div class="r-body">
-          <div class="r-line1"><b style="color:${a.color}">${esc(a.name)}</b>${a.nick && a.nick !== a.name ? `<span class="r-nick">${esc(a.nick)}</span>` : ""}<span class="chip ${a.status === "working" ? "running" : a.status === "paused" ? "review" : "idle"}">${st}</span></div>
-          <div class="r-line2">${esc(zone)} · ${esc(a.roleLabel)}</div>
+          <div class="r-line1"><b style="color:${a.color}">${esc(a.name)}</b><span class="chip ${a.status === "working" ? "running" : a.status === "paused" ? "review" : "idle"}">${st}</span></div>
+          <div class="r-line2">${esc(a.roleLabel)}</div>
           <div class="r-line2">เสร็จวันนี้ ${doneToday} งาน${a.metrics?.toolCalls ? ` · 🔧 ${a.metrics.toolCalls}` : ""}${a.activeTool ? ` · <span class="tool-chip" data-toolchip>${toolChip(a.activeTool)}</span>` : ""}</div>
           ${task ? `<div class="r-task">${esc(trunc(task.title, 34))}</div><div class="bar"><i style="width:${Math.round((task.progress || 0) * 100)}%;background:${a.color}"></i></div><div class="r-phase phase">${esc(task.phase || "")}</div>` : ""}
         </div></div>`;

@@ -155,7 +155,7 @@ function assign(task, agent) {
   emitAgent(agent);
   if (from === "captain") {
     const byDuty = task.preferredAgentId === agent.id ? " ตามหน้าที่" : task.preferredAgentId ? ` (แทน ${getAgent(task.preferredAgentId)?.name || "คนที่เลือกไว้"} ที่หยุดพัก)` : "";
-    bus.log(`📨 กัปตันมอบหมาย "${task.title}" ให้ ${agent.name} (${agent.nick && agent.nick !== agent.name ? `${agent.nick} · ` : ""}${agent.roleLabel})${byDuty}`, { agentId: agent.id, taskId: task.id });
+    bus.log(`📨 กัปตันมอบหมาย "${task.title}" ให้ ${agent.name} (${agent.roleLabel})${byDuty}`, { agentId: agent.id, taskId: task.id });
   }
   void start(task, agent);
 }

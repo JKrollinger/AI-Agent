@@ -7,7 +7,7 @@ const TAU = Math.PI * 2;
 const FONT = '"Noto Sans Thai", system-ui, sans-serif';
 const EMOJI_FONT = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
 const CHAR_SCALE = 1.6; // ตัวละคร/สถานีใหญ่กว่ากระเบื้อง (สัดส่วนแบบ RO)
-const ROLE_JOB = { captain: "lord-knight", analyst: "high-wizard", writer: "professor", coder: "whitesmith", reviewer: "high-priest" };
+const ROLE_JOB = { captain: "lord-knight", marketer: "sniper", researcher: "stalker", engineer: "high-wizard", finance: "professor", coder: "whitesmith", reviewer: "high-priest" };
 const RESEARCH_JOBS = ["sniper", "stalker"];
 const TILE_COLORS = { sand: "#d9b875", sand2: "#d2ae6c", sandDark: "#b8945c", stone: "#b9a893", stoneLight: "#d5c8b4", water: "#3f8fb5" };
 const EMOTE_GLYPH = { alert: "!", question: "?", dots: "…", sleep: "zZ", angry: "💢", heart: "♥" };
@@ -104,6 +104,35 @@ function keyOut(img, transparent = "auto") {
   out.getContext("2d").putImageData(data, -x0, -y0);
   return out;
 }
+/** ตรวจว่าภาพถูกขยายกี่เท่าจากพิกเซลจริง: ถ้าพิกเซลเกือบทุกจุดซ้ำกันเป็นบล็อก f×f → คืน f (ลอง 4, 3, 2) ไม่ใช่ → 1 */
+function detectPixelSize(canvas) {
+  const w = canvas.width, h = canvas.height;
+  if (w < 8 || h < 8) return 1;
+  const d = canvas.getContext("2d").getImageData(0, 0, w, h).data;
+  const same = (i, j) => d[i] === d[j] && d[i + 1] === d[j + 1] && d[i + 2] === d[j + 2] && d[i + 3] === d[j + 3];
+  for (const f of [4, 3, 2]) {
+    let total = 0, ok = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const bx = x - (x % f), by = y - (y % f);
+        if (bx === x && by === y) continue;
+        total++;
+        if (same((y * w + x) * 4, (by * w + bx) * 4)) ok++;
+      }
+    }
+    if (total && ok / total > 0.92) return f;
+  }
+  return 1;
+}
+/** ย่อภาพลง f เท่าแบบเลือกพิกเซล (nearest) — ใช้ถอดการขยายของตัวจำลองออกให้เหลือพิกเซลจริง */
+function downsample(canvas, f) {
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.floor(canvas.width / f)); out.height = Math.max(1, Math.floor(canvas.height / f));
+  const g = out.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  g.drawImage(canvas, 0, 0, out.width * f, out.height * f, 0, 0, out.width, out.height);
+  return out;
+}
 async function loadPngFrames(dir, anim, manifest, transparent) {
   const frames = [];
   if (Array.isArray(manifest?.anims?.[anim])) {
@@ -135,13 +164,17 @@ function loadPng(jobId) {
       const f = await loadPngFrames(dir, anim, manifest, transparent);
       anims[anim] = f.length ? f : null;
     }
+    // ภาพจากตัวจำลองมักถูกขยาย 2–3 เท่าจากพิกเซลจริงของเกม → ย่อกลับเป็นพิกเซลจริงก่อน (nearest) เพื่อให้ขยายเป็นจำนวนเต็มแล้วคม
+    const ps = manifest?.pixelSize === undefined || manifest.pixelSize === "auto" ? detectPixelSize(idle[0]) : Math.max(1, Math.round(Number(manifest.pixelSize) || 1));
+    if (ps > 1) for (const k of Object.keys(anims)) if (anims[k]) anims[k] = anims[k].map((c) => downsample(c, ps));
     // ย่อ/ขยายให้ตัวละคร (หลังตัดขอบ) สูงราว PNG_TARGET_H แล้วคูณด้วย manifest.scale (ค่าเริ่มต้น 1)
-    const autoScale = PNG_TARGET_H / Math.max(1, idle[0].height);
+    const autoScale = PNG_TARGET_H / Math.max(1, anims.idle[0].height);
     const userScale = Number(manifest?.scale) > 0 ? Number(manifest.scale) : 1;
     // facing = ทิศที่ภาพหันอยู่ ("left" = หันซ้าย/ซ้ายล่าง ค่าเริ่มต้น) ใช้ตัดสินว่าต้องกลับด้านภาพเมื่อเดินไปอีกทางหรือไม่
-    const sprite = { anims, scale: autoScale * userScale, offsetY: Number(manifest?.offsetY) || 0, facing: manifest?.facing === "right" ? "right" : "left" };
+    // crisp = วาดด้วยตัวคูณจำนวนเต็มของพิกเซลจริง (1x, 2x, 3x) ไม่มีการย่อ/ขยายเป็นเศษ → ภาพคมเหมือนในเกม (ปิดได้ด้วย "crisp": false)
+    const sprite = { anims, scale: autoScale * userScale, offsetY: Number(manifest?.offsetY) || 0, facing: manifest?.facing === "right" ? "right" : "left", crisp: manifest?.crisp !== false, pixelSize: ps };
     pngs.set(jobId, sprite);
-    console.info(`[scene] ใช้สไปรต์ PNG ของ ${jobId} (idle ${idle.length} เฟรม${anims.work ? `, work ${anims.work.length}` : ""}${anims.sit ? ", sit" : ""}; ตัดขอบแล้ว ${idle[0].width}x${idle[0].height} px, scale ${sprite.scale.toFixed(2)})`);
+    console.info(`[scene] ใช้สไปรต์ PNG ของ ${jobId} (idle ${idle.length} เฟรม${anims.work ? `, work ${anims.work.length}` : ""}${anims.walk ? `, walk ${anims.walk.length}` : ""}${anims.sit ? ", sit" : ""}; พิกเซลจริง ${anims.idle[0].width}x${anims.idle[0].height} px${ps > 1 ? ` (ย่อจาก ${ps}x)` : ""}, ${sprite.crisp ? "วาดคมแบบจำนวนเต็ม" : `scale ${sprite.scale.toFixed(2)}`})`);
     return sprite;
   })();
   pngLoading.set(jobId, p);
@@ -511,12 +544,14 @@ export function createScene(canvas, S, hooks = {}) {
     else if (working && P.anims.work) { frames = P.anims.work; period = 180; }
     else if (frames.length === 1 && !working && !paused) dy = Math.floor(ts / 500) % 2 ? -1 * V.scale : 0; // โยกตัวเบา ๆ ตอนว่าง
     const img = frames[Math.floor(ts / period) % frames.length];
-    const k = V.scale * P.scale * (mapImg?.charScale || 1);
+    let k = V.scale * P.scale * (mapImg?.charScale || 1);
+    if (P.crisp && k >= 1) k = Math.round(k); // ขยาย = ตัวคูณจำนวนเต็มให้คม; ย่อ (k < 1) = ย่อแบบเนียนตาม charScale เพื่อให้ปรับขนาดได้ละเอียด
     const w = img.width * k, h = img.height * k;
     // กลับด้านภาพเมื่อเดินสวนทางกับทิศที่ภาพหันอยู่ (facing ใน manifest, ค่าเริ่มต้น "left")
     const flip = wk && ((wk.dir > 0) === (P.facing === "left"));
     ctx.save();
-    ctx.imageSmoothingEnabled = false; // พิกเซลอาร์ตขยายแล้วต้องคม
+    ctx.imageSmoothingEnabled = k < 1; // ขยาย = คม (nearest), ย่อ (โหมดไม่คม) = เนียน ไม่ให้พิกเซลหาย
+    ctx.imageSmoothingQuality = "high";
     if (flip) { ctx.translate(2 * m.x, 0); ctx.scale(-1, 1); }
     if (V.hover === a.id) { ctx.shadowColor = a.color || "#fff"; ctx.shadowBlur = 16; }
     ctx.drawImage(img, Math.round(m.x - w / 2), Math.round(m.y - h + P.offsetY * V.scale + dy), Math.round(w), Math.round(h));
@@ -545,9 +580,9 @@ export function createScene(canvas, S, hooks = {}) {
     const working = a.status === "working", paused = a.status === "paused";
     const col = a.color || "#8b97ad";
     // ป้ายชื่อใต้เท้า
-    const ny = m.y + 12 * V.scale + 6;
+    const ny = m.y + 4 * V.scale + 3; // ป้ายชื่อชิดเท้า (เดิม 12*scale+6 ห่างเกินไป)
     text(a.name || a.id, m.x, ny, { size: 12, weight: 700 });
-    const sub = [a.nick && a.nick !== a.name ? a.nick : "", a.roleLabel].filter(Boolean).join(" · ");
+    const sub = a.roleLabel; // แสดงเฉพาะตำแหน่ง (ไม่แสดงชื่อเล่นไทย)
     text(sub, m.x, ny + 14, { size: 10, weight: 500, fill: "#ffd86b" });
     // HP (ความคืบหน้างาน) / SP (อัตราใช้งาน)
     const bw = 60, bx = m.x - bw / 2, by = ny + 24;
@@ -804,7 +839,7 @@ export function createScene(canvas, S, hooks = {}) {
       if (a.status !== "paused" && emotes.get(a.id)?.type === "sleep") emotes.delete(a.id);
     }
     drawFx(dt, ts);
-    drawZoneLabels();
+    // ป้ายชื่อสถานที่ปิดไว้ตามคำขอผู้ใช้ (เปิดคืนได้โดยเรียก drawZoneLabels())
     bubbles.length = 0;
     for (const a of S.agents.values()) drawTags(a, ts);
     for (const b of bubbles) drawBubble(b, ts);
