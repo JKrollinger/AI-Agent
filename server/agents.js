@@ -45,7 +45,7 @@ export const TOOL_META = {
 
 export const ROLES = {
   captain: {
-    label: "กัปตัน (Project Manager)",
+    label: "Project Manager",
     emoji: "🧭",
     color: "#f5b942",
     description:
@@ -56,7 +56,7 @@ export const ROLES = {
     tools: [],
   },
   marketer: {
-    label: "นักการตลาด",
+    label: "Marketing Specialist",
     emoji: "📣",
     color: "#4fa3ff",
     description: "วิเคราะห์ตลาด คู่แข่ง กลุ่มเป้าหมาย วางแผนการตลาดและข้อความสื่อสาร (มีเครื่องมือค้นเว็บ/อ่านหน้าเว็บ)",
@@ -68,7 +68,7 @@ export const ROLES = {
 ใช้อย่างประหยัด (ไม่เกินอย่างละ ${WEB_MAX_USES} ครั้ง) และระบุแหล่งที่มา (URL) ของข้อมูลสำคัญไว้ในผลงาน`,
   },
   researcher: {
-    label: "นักวิจัย",
+    label: "Research Analyst",
     emoji: "🔎",
     color: "#9b7dff",
     description: "ค้นคว้า รวบรวมข้อเท็จจริง สถิติ กรณีศึกษา และตรวจสอบแหล่งอ้างอิง (มีเครื่องมือค้นเว็บ/อ่านหน้าเว็บ)",
@@ -80,7 +80,7 @@ export const ROLES = {
 ใช้อย่างประหยัด (ไม่เกินอย่างละ ${WEB_MAX_USES} ครั้ง) และระบุแหล่งที่มา (URL) ของข้อมูลสำคัญไว้ในผลงาน`,
   },
   finance: {
-    label: "นักการเงินและกลยุทธ์",
+    label: "Finance & Strategy",
     emoji: "📊",
     color: "#ff7eb6",
     description: "วิเคราะห์ต้นทุน ผลตอบแทน ความเสี่ยง เปรียบเทียบทางเลือก และเรียบเรียงข้อเสนอสำหรับผู้บริหาร (มีเครื่องมือรันโค้ดคำนวณ)",
@@ -92,7 +92,7 @@ export const ROLES = {
 เฉพาะเมื่อช่วยให้ข้อสรุปแม่นยำขึ้น และสรุปผลการคำนวณสำคัญไว้ในผลงาน`,
   },
   engineer: {
-    label: "วิศวกร AI",
+    label: "AI Engineer",
     emoji: "🧠",
     color: "#6cc4e0",
     description: "ออกแบบโซลูชัน AI/LLM, prompt, การประเมินผล และต้นทุนโทเคน ส่งต่อให้นักพัฒนาสร้าง (มีเครื่องมือรันโค้ด)",
@@ -104,7 +104,7 @@ export const ROLES = {
 เฉพาะเมื่อจำเป็น และสรุปผลไว้ในผลงาน`,
   },
   coder: {
-    label: "นักพัฒนาและระบบอัตโนมัติ",
+    label: "Developer & Automation",
     emoji: "💻",
     color: "#3dd598",
     description: "เขียนโค้ดต้นแบบ สคริปต์อัตโนมัติ API และคู่มือใช้งาน พร้อมทดสอบว่ารันได้จริง (มีเครื่องมือรันโค้ด)",
@@ -116,7 +116,7 @@ export const ROLES = {
 และรายงานผลการทดสอบสั้น ๆ ไว้ท้ายผลงาน`,
   },
   reviewer: {
-    label: "ผู้ตรวจสอบ (QA & Compliance)",
+    label: "Quality & Compliance",
     emoji: "✅",
     color: "#ffa552",
     description: "ตรวจคุณภาพ ความถูกต้อง และการปฏิบัติตามกฎของทุกผลงาน ให้คะแนนและส่งกลับแก้เมื่อไม่ผ่าน (มีเครื่องมือเปิดตรวจแหล่งอ้างอิง)",
