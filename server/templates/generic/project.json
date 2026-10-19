@@ -1,5 +1,6 @@
 {
   "name": "",
+  "template": "generic",
   "context": {
     "always": ["CLAUDE.md", "AGENTS.md", "README.md"],
     "docsIndex": ["docs/*.md", "docs/**/*.md"],

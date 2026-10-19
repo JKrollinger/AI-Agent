@@ -16,15 +16,18 @@
 ## 1. เริ่มใช้ใน 3 ขั้น
 
 ```bash
-# 1) สร้าง .grock/ และลงทะเบียน (รันจากโฟลเดอร์ศูนย์ควบคุม)
-node tools/grock.mjs init "C:\Projects\MyShop" --id myshop
+# 1) สร้าง .grock/ จากแม่แบบตามประเภทโปรเจกต์ แล้วลงทะเบียน (รันจากโฟลเดอร์ศูนย์ควบคุม; ดูแม่แบบทั้งหมด: node tools/grock.mjs templates)
+node tools/grock.mjs init "C:\Projects\MyShop" --id myshop --template webapp
 
-# 2) แก้ C:\Projects\MyShop\.grock\brief.md ให้ตรงกับโปรเจกต์ แล้วดูว่าทีมจะเห็นอะไร (ไม่เสียเงิน ใช้ได้ในโหมด sim)
+# 2) แก้ C:\Projects\MyShop\.grock\brief.md ให้ตรงกับโปรเจกต์ ตรวจความพร้อม แล้วดูว่าทีมจะเห็นอะไร (ไม่เสียเงิน ใช้ได้ในโหมด sim)
+node tools/grock.mjs doctor myshop
 node tools/grock.mjs context myshop --role coder
 
 # 3) สั่งงาน แล้วรอผล
 node tools/grock.mjs run "ออกแบบระบบคูปองส่วนลดและเขียนต้นแบบ API" --project myshop --wait
 ```
+
+แม่แบบ (`--template generic|webapp|marketing|research|data|business`) ตั้ง `plan.roles`, `roles.*`, `qa`, `budget` และ `skills/<ตำแหน่ง>.md` ให้เหมาะกับประเภทโปรเจกต์ล่วงหน้า คุณแก้เฉพาะ `brief.md` ก็ใช้ได้ — วิธีเลือกและปรับใช้ทีละขั้นอยู่ใน [docs/08-playbook.md](08-playbook.md) ส่วน `doctor` เตือนเมื่อ brief ยังเป็นโครงว่าง ไฟล์ใน `context.always` ไม่มี หรือยังไม่ตั้งงบ
 
 หรือเลือกโปรเจกต์จากช่อง "📁" ข้างปุ่ม **มอบหมายงาน** บนหน้าเว็บ ผลงานจะอยู่ที่ `C:\Projects\MyShop\.grock\out\<jobId>\result.md`
 
@@ -54,6 +57,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 ```json
 {
   "name": "MyShop",
+  "template": "webapp",
   "context": {
     "always": ["CLAUDE.md", "README.md", "docs/architecture.md#ภาพรวม"],
     "docsIndex": ["docs/*.md", "docs/**/*.md"],
@@ -75,6 +79,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 
 | คีย์ | ความหมาย |
 |---|---|
+| `template` | ชื่อแม่แบบที่ใช้สร้าง `.grock/` (`init --template`) แสดงใน `context`/`doctor` ไม่มีผลต่อการทำงาน |
 | `context.always` | ไฟล์ที่ใส่ให้ทุกครั้ง `path` หรือ `path#หัวข้อ` (เอาเฉพาะหัวข้อ markdown นั้น เหมาะกับ README ยาว ๆ) ไฟล์ที่ไม่มีจะถูกข้ามเงียบ ๆ |
 | `context.docsIndex` | แพตเทิร์นไฟล์ที่ทำดัชนี (ชื่อ + หัวข้อแรก + ขนาด ไม่ใส่เนื้อหา) ให้กัปตันรู้ว่ามีเอกสารอะไรบ้าง |
 | `context.maxChars` / `maxCharsPerFile` | งบตัวอักษรรวม / ต่อไฟล์ (ไทย ≈ 1 โทเคนต่อ 1–3 ตัวอักษร) |

@@ -87,19 +87,21 @@ copy .env.example .env
 
 ## ใช้งานกับโปรเจกต์อื่น (Project Pack)
 
-ให้ทีม AI ทำงานให้โปรเจกต์ของคุณโดยอ่านเอกสารของโปรเจกต์นั้น (README/CLAUDE.md/docs) และเขียนผลงานกลับเข้าโฟลเดอร์โปรเจกต์:
+ให้ทีม AI ทำงานให้โปรเจกต์ของคุณโดยอ่านเอกสารของโปรเจกต์นั้น (README/CLAUDE.md/docs) และเขียนผลงานกลับเข้าโฟลเดอร์โปรเจกต์ เริ่มจากแม่แบบ `.grock/` สำเร็จรูปตามประเภทโปรเจกต์ (generic, webapp, marketing, research, data, business):
 
 ```bash
-node tools/grock.mjs init "C:\Projects\MyShop" --id myshop
+node tools/grock.mjs templates                                        # ดูแม่แบบทั้งหมด
+node tools/grock.mjs init "C:\Projects\MyShop" --id myshop --template webapp
+node tools/grock.mjs doctor myshop                                    # ตรวจว่า brief/ไฟล์/งบ พร้อมหรือยัง
 ```
 
-แก้ `C:\Projects\MyShop\.grock\brief.md` ให้ตรงกับโปรเจกต์ แล้วสั่งงาน (จากโฟลเดอร์ไหนก็ได้ หรือจาก Claude Code ที่เปิดอยู่ในโปรเจกต์นั้น):
+แก้ `C:\Projects\MyShop\.grock\brief.md` ให้ตรงกับโปรเจกต์ (แม่แบบตั้งตำแหน่งที่ใช้ โมเดล QA งบ และทักษะเฉพาะประเภทให้แล้ว) แล้วสั่งงาน (จากโฟลเดอร์ไหนก็ได้ หรือจาก Claude Code ที่เปิดอยู่ในโปรเจกต์นั้น):
 
 ```bash
 node tools/grock.mjs run "เขียนแผนทดสอบสำหรับโมดูลชำระเงิน" --project myshop --wait
 ```
 
-ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md)
+ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md) และวิธีประยุกต์กับโปรเจกต์แต่ละประเภททีละขั้น (เลือกแม่แบบ ปรับ brief จำกัดตำแหน่ง ตั้งงบ สั่งจาก Claude Code อ่านผล) อยู่ใน [docs/08-playbook.md](docs/08-playbook.md)
 
 ## REST API (ใช้ต่อกับระบบอื่นได้)
 
@@ -136,3 +138,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/01-grok-architecture.md](docs/01-grok-architecture.md) — Grok 4 Heavy, Grok 4.20 (4 agents), Agent Tools API, Grok Build, Macrohard และสิ่งที่เรานำมาใช้
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
+- [docs/08-playbook.md](docs/08-playbook.md) — Playbook: ประยุกต์โมเดลต้นแบบกับโปรเจกต์ประเภทต่าง ๆ ด้วยแม่แบบ .grock/ (ตารางประเภท → ตำแหน่ง → งบ)
