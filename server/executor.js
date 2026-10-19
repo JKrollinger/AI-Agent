@@ -719,7 +719,7 @@ async function simRun({ agent, task, context, signal, onProgress }) {
   const toolPhases = simToolPhases(role, context, agent);
   // ประกอบ system prompt จริงแม้ในโหมดจำลอง เพื่อให้เห็นขนาดบริบท/ต้นทุนเมื่อมีโปรเจกต์ (และจับบั๊กของการประกอบ prompt ได้โดยไม่เสียเงิน)
   const sys = buildSystem(agent, task, context);
-  const ctxChars = sys.chars + (context.project?.data?.length || 0) + (context.files || []).reduce((n, f) => n + (f.text?.length || 0), 0);
+  const ctxChars = sys.chars + (context.project?.placement === "system" ? 0 : context.project?.data?.length || 0) + (context.files || []).reduce((n, f) => n + (f.text?.length || 0), 0);
   const output = role === "reviewer" ? "" : `${context.project ? `(ผลงานจำลองสำหรับโปรเจกต์ "${context.project.name}" — บริบท ${ctxChars.toLocaleString()} ตัวอักษร)\n\n` : ""}${simOutput({ ...agent, role }, task, context)}`;
   const review = role === "reviewer" ? simReview(context) : null;
   const finalText = review
@@ -798,7 +798,7 @@ export async function synthesizeJob(job, tasks, { project = null, onPhase, signa
   const cap = effectiveCaptain(project);
   const { text, usage, model } = await llm.streamText({
     model: cap?.model || CAPTAIN_MODEL,
-    system: captainSystem(project, cap),
+    system: captainSystem(project && { ...project, placement: "user" }, cap), // ไม่ใส่ <project_files> ตอนสังเคราะห์ ไม่ว่า placement ใด (ผลงานเต็มอยู่ในไฟล์แล้ว)
     prompt: `โจทย์จากผู้ใช้: "${job.goal}"${project ? ` (โปรเจกต์: ${project.name})` : ""}\n\nผลงานทั้งหมดจากทีม:\n\n${parts.join("\n\n")}\n\nสังเคราะห์เป็นผลลัพธ์สุดท้ายฉบับสมบูรณ์สำหรับส่งมอบผู้ใช้ (ภาษาไทย) ให้ครบถ้วน อ่านง่าย มีบทสรุปผู้บริหารตอนต้น`,
     effort: cap?.effort || "medium",
     maxTokens: cap?.maxTokens || 16000,

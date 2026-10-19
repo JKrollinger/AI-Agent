@@ -119,6 +119,12 @@ export function mergeUsage(acc, u) {
   for (const k of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
     if (typeof u[k] === "number") out[k] = (out[k] || 0) + u[k];
   }
+  if (u.cache_creation) { // รายละเอียดการเขียนแคชแยกตาม ttl (ใช้คิดราคา 1h)
+    out.cache_creation = {
+      ephemeral_5m_input_tokens: (out.cache_creation?.ephemeral_5m_input_tokens || 0) + (u.cache_creation.ephemeral_5m_input_tokens || 0),
+      ephemeral_1h_input_tokens: (out.cache_creation?.ephemeral_1h_input_tokens || 0) + (u.cache_creation.ephemeral_1h_input_tokens || 0),
+    };
+  }
   if (u.server_tool_use) {
     out.server_tool_use = {
       web_search_requests: (out.server_tool_use?.web_search_requests || 0) + (u.server_tool_use.web_search_requests || 0),

@@ -29,7 +29,8 @@ for (let i = 1; i < argv.length; i++) {
   } else positional.push(a);
 }
 
-const out = (s = "") => process.stdout.write(`${s}\n`);
+// ตัด control characters (ยกเว้น tab) ก่อนพิมพ์ — ข้อความบางส่วนมาจากไฟล์ของโปรเจกต์ ซึ่งอาจฝัง escape sequence ของเทอร์มินัล
+const out = (s = "") => process.stdout.write(`${String(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")}\n`);
 const die = (msg, code = 1) => { process.stderr.write(`✖ ${msg}\n`); process.exit(code); };
 
 async function api(method, p, body) {

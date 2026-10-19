@@ -205,7 +205,9 @@ function renderProjects() {
   const sel = $("#projectSelect"); if (!sel) return;
   let remembered = "";
   try { remembered = localStorage.getItem("grock.project") || ""; } catch {}
-  const current = sel.value || remembered;
+  const first = !sel.dataset.ready; // ใช้ค่าที่จำไว้เฉพาะครั้งแรก — หลังจากนั้นเคารพสิ่งที่ผู้ใช้เลือกอยู่ (รวม "ไม่ระบุโปรเจกต์")
+  sel.dataset.ready = "1";
+  const current = first ? remembered : sel.value;
   const list = S.projects || [];
   sel.innerHTML = `<option value="">ไม่ระบุโปรเจกต์</option>` + list.map((p) => `<option value="${esc(p.id)}"${p.ok ? "" : " disabled"}>📁 ${esc(p.name || p.id)}${p.ok ? "" : " (ไม่พบโฟลเดอร์)"}</option>`).join("");
   if (current && list.some((p) => p.id === current && p.ok)) sel.value = current;
@@ -627,6 +629,7 @@ $("#jobForm").addEventListener("submit", (e) => {
   const project = selectedProject();
   act(api("/api/jobs", { goal, project }), (r) => toast(project ? `📥 ส่งโจทย์ให้กัปตันแล้ว (โปรเจกต์ ${project}) — ผลงานจะอยู่ที่ ${r.job?.outputDir || ""}` : "📥 ส่งโจทย์ให้กัปตันแล้ว"));
 });
+$("#projectSelect")?.addEventListener("change", (e) => { try { localStorage.setItem("grock.project", e.target.value); } catch {} });
 $("#demoBtn").addEventListener("click", () => act(api("/api/demo", { project: selectedProject() }), (r) => toast(`📥 มอบหมายงานตัวอย่าง: "${trunc(r.job.goal, 50)}"`)));
 $("#modeBadge").addEventListener("click", () => act(api("/api/mode", { mode: S.mode === "live" ? "sim" : "live" }), () => {}));
 

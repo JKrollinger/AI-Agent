@@ -13,10 +13,11 @@ const WEB_MAX_USES = Math.max(1, Number(process.env.TOOL_MAX_USES) || 5);
 
 // ราคาต่อ 1 ล้านโทเคน (USD) — ใช้คำนวณต้นทุนต่องาน/ต่อคน
 export const PRICING = {
-  "claude-opus-5-5": { input: 4.0, output: 20.0, cacheRead: 0.2, cacheWrite: 5.0 },
-  "claude-sonnet-5-5": { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 2.5 },
-  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
-  "claude-fable-5-1": { input: 10.0, output: 50.0, cacheRead: 0.25, cacheWrite: 12.5 },
+  // cacheWrite = เขียนแคช 5 นาที (1.25x), cacheWrite1h = เขียนแคช 1 ชั่วโมง (2x)
+  "claude-opus-5-5": { input: 4.0, output: 20.0, cacheRead: 0.2, cacheWrite: 5.0, cacheWrite1h: 8.0 },
+  "claude-sonnet-5-5": { input: 2.0, output: 10.0, cacheRead: 0.2, cacheWrite: 2.5, cacheWrite1h: 4.0 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, cacheWrite1h: 0.2 },
+  "claude-fable-5-1": { input: 10.0, output: 50.0, cacheRead: 0.25, cacheWrite: 12.5, cacheWrite1h: 20.0 },
 };
 // ค่าใช้เครื่องมือ: web search คิด $10 ต่อ 1,000 ครั้ง (web fetch ไม่คิดเพิ่ม, code execution ฟรีเมื่อใช้คู่กับ web tools)
 export const WEB_SEARCH_USD_PER_REQUEST = 10 / 1000;
@@ -229,10 +230,11 @@ export function estimateCost(model, usage = {}, fallbackModel = null) {
   const input = usage.input_tokens || 0;
   const output = usage.output_tokens || 0;
   const cacheRead = usage.cache_read_input_tokens || 0;
-  const cacheWrite = usage.cache_creation_input_tokens || 0;
+  const write1h = usage.cache_creation?.ephemeral_1h_input_tokens || 0; // API แยกส่วนที่เขียนแคช 1 ชั่วโมงไว้ให้
+  const cacheWrite = Math.max(0, (usage.cache_creation_input_tokens || 0) - write1h);
   const webSearches = usage.server_tool_use?.web_search_requests || 0;
   return (
-    (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite) / 1_000_000 +
+    (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite + write1h * (p.cacheWrite1h || p.input * 2)) / 1_000_000 +
     webSearches * WEB_SEARCH_USD_PER_REQUEST
   );
 }

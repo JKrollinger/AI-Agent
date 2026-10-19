@@ -55,8 +55,8 @@ const DEFAULT_TREE_IGNORE = [
 // ---------------------------------------------------------------------------
 const RESERVED_RE = /^(con|nul|prn|aux|com[1-9]|lpt[1-9])(\..*)?$/i;
 const DENY_FILE_RE = [
-  /^\.env(\..*)?$/i,
-  /\.(pem|key|pfx|p12|jks|sqlite|sqlite3|db|tfstate|kdbx)$/i,
+  /(^|\.)env(\..*)?$/i, // .env, .env.local, local.env, prod.env
+  /\.(pem|key|pfx|p12|jks|sqlite|sqlite3|db|tfstate|kdbx|ppk|tfvars|ovpn|pgpass)$/i,
   /^id_(rsa|dsa|ed25519|ecdsa)(\.pub)?$/i,
   /^(\.npmrc|\.netrc|\.pypirc|\.htpasswd)$/i,
   /credential.*\.json$/i,
@@ -74,16 +74,21 @@ const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}/g,
   /(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*["']?[^\s"']{8,}/gi,
+  /Private-Lines:\s*\d+[\s\S]*?(?=\n?Private-MAC:|(?![\s\S]))/g, // PuTTY .ppk
+  { re: /(\/\/[^\s\/:@]+:)[^\s\/@]{3,}@/g, out: (m, g1) => `${g1}[REDACTED]@` }, // scheme://user:password@host
 ];
+const stripCtl = (s) => String(s ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, ""); // กัน escape sequence ของเทอร์มินัลจากไฟล์ของโปรเจกต์
 
 /** ปิดบังค่าลับในข้อความก่อนส่งเข้าโมเดล/เขียน log → { text, count } */
 export function redactSecrets(text) {
   let count = 0;
   let out = String(text || "");
-  for (const re of SECRET_PATTERNS) {
-    out = out.replace(re, (m, g1) => {
+  for (const p of SECRET_PATTERNS) {
+    const re = p.re || p;
+    const fn = p.out || ((m, g1) => (g1 ? `${g1}=[REDACTED]` : "[REDACTED]"));
+    out = out.replace(re, (...args) => {
       count += 1;
-      return g1 ? `${g1}=[REDACTED]` : "[REDACTED]";
+      return fn(...args);
     });
   }
   return { text: out, count };
@@ -246,7 +251,9 @@ export function registerProject(id, dir, { name } = {}) {
   const real = fs.realpathSync.native(abs);
   if (!fs.existsSync(path.join(real, PACK_DIR, "project.json"))) throw new Error(`ยังไม่มี ${PACK_DIR}/project.json ในโฟลเดอร์นี้ — รัน: node tools/grock.mjs init "${real}" --id ${id}`);
   const reg = loadRegistry();
-  reg.projects[id] = { path: real.split(path.sep).join("/"), name: name || reg.projects[id]?.name || "", addedAt: reg.projects[id]?.addedAt || new Date().toISOString() };
+  const safeName = typeof name === "string" ? stripCtl(name).trim().slice(0, 80) : "";
+  const oldName = typeof reg.projects[id]?.name === "string" ? reg.projects[id].name : "";
+  reg.projects[id] = { path: real.split(path.sep).join("/"), name: safeName || oldName, addedAt: reg.projects[id]?.addedAt || new Date().toISOString() };
   saveRegistry(reg);
   packCache.delete(id);
   return { id, ...reg.projects[id] };
@@ -267,7 +274,7 @@ export function listProjects() {
   return Object.entries(reg.projects).map(([id, p]) => {
     const root = String(p.path || "");
     const ok = root && fs.existsSync(path.join(root, PACK_DIR, "project.json"));
-    let name = p.name || "";
+    let name = typeof p.name === "string" ? stripCtl(p.name) : "";
     if (!name && ok) {
       try { name = JSON.parse(fs.readFileSync(path.join(root, PACK_DIR, "project.json"), "utf8")).name || ""; } catch {}
     }
@@ -298,7 +305,7 @@ function validateOverride(src = {}, { allowDuties = true, allowInstructions = fa
   if (src.maxTokens !== undefined) out.maxTokens = clampInt(src.maxTokens, 2000, 64000, undefined);
   if (src.skillMode === "replace" || src.skillMode === "append") out.skillMode = src.skillMode;
   const known = new Set(["model", "effort", "toolsEnabled", "duties", "instructions", "maxTokens", "skillMode"]);
-  for (const k of Object.keys(src)) if (!known.has(k)) warnings.push(`${where}: ไม่รู้จักคีย์ "${k}" — ข้าม`);
+  for (const k of Object.keys(src)) if (!known.has(k)) warnings.push(`${where}: ไม่รู้จักคีย์ "${stripCtl(k).slice(0, 60)}" — ข้าม`);
   return out;
 }
 
@@ -312,21 +319,22 @@ function normalizeConfig(raw, warnings) {
   const output = c.output && typeof c.output === "object" ? c.output : {};
   const roles = {};
   for (const [role, v] of Object.entries(c.roles && typeof c.roles === "object" ? c.roles : {})) {
-    if (!ROLES[role]) { warnings.push(`roles.${role}: ไม่มีตำแหน่งนี้ — ข้าม`); continue; }
+    if (!ROLES[role]) { warnings.push(`roles.${stripCtl(role).slice(0, 40)}: ไม่มีตำแหน่งนี้ — ข้าม`); continue; }
     roles[role] = validateOverride(v || {}, { allowInstructions: true }, warnings, `roles.${role}`);
   }
   const agents = {};
   for (const [id, v] of Object.entries(c.agents && typeof c.agents === "object" ? c.agents : {})) {
-    agents[id] = validateOverride(v || {}, { allowInstructions: true }, warnings, `agents.${id}`);
+    agents[id] = validateOverride(v || {}, { allowInstructions: true }, warnings, `agents.${stripCtl(id).slice(0, 40)}`);
   }
   const planRoles = (asArray(plan.roles) || []).filter((r) => {
     if (ROLES[r] && r !== "captain") return true;
-    warnings.push(`plan.roles: ไม่มีตำแหน่ง "${r}" — ข้าม`);
+    warnings.push(`plan.roles: ไม่มีตำแหน่ง "${stripCtl(r).slice(0, 40)}" — ข้าม`);
     return false;
   });
-  const outDir = String(output.dir || DEFAULT_CONFIG.output.dir).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  const outDirOk = Boolean(outDir) && !path.isAbsolute(outDir) && !outDir.includes("..") && !outDir.includes(":") && /^\.grock\/(?!skills(\/|$))[^/]+(\/[^/]+)*$/.test(outDir);
-  if (!outDirOk) warnings.push(`output.dir "${output.dir}" ต้องเป็น path สัมพัทธ์ใต้ .grock/ (ยกเว้น .grock/skills) — ใช้ค่าเริ่มต้น`);
+  const outDirRaw = String(output.dir || DEFAULT_CONFIG.output.dir).replace(/\\/g, "/");
+  const outDir = outDirRaw.split("/").filter((seg) => seg && seg !== ".").join("/"); // ตัด "." และ "/" ซ้ำ ก่อนตรวจ (ไม่งั้น .grock/./skills หลุด)
+  const outDirOk = Boolean(outDir) && !path.isAbsolute(outDirRaw) && !outDir.includes("..") && !outDir.includes(":") && /^\.grock\/(?!skills(\/|$))[^/]+(\/[^/]+)*$/i.test(outDir);
+  if (!outDirOk) warnings.push(`output.dir "${stripCtl(outDirRaw).slice(0, 80)}" ต้องเป็น path สัมพัทธ์ใต้ .grock/ (ยกเว้น .grock/skills) — ใช้ค่าเริ่มต้น`);
   // plan.roles ที่มีแต่ reviewer จะทำให้ทุกงานกลายเป็นงานตรวจ → ถือว่าไม่ถูกต้อง
   if (planRoles.length && planRoles.every((r) => r === "reviewer")) {
     warnings.push("plan.roles: ต้องมีตำแหน่งที่ผลิตงานอย่างน้อย 1 ตำแหน่ง (ไม่ใช่ reviewer อย่างเดียว) — ใช้ทุกตำแหน่ง");
@@ -334,7 +342,7 @@ function normalizeConfig(raw, warnings) {
   }
   const placement = ctx.placement === "system" ? "system" : "user";
   return {
-    name: typeof c.name === "string" ? c.name.trim().slice(0, 80) : "",
+    name: typeof c.name === "string" ? stripCtl(c.name).trim().slice(0, 80) : "",
     context: {
       always: asArray(ctx.always) ?? [...DEFAULT_CONFIG.context.always],
       docsIndex: asArray(ctx.docsIndex) ?? [...DEFAULT_CONFIG.context.docsIndex],

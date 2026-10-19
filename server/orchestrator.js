@@ -167,6 +167,16 @@ function budgetFor(job) {
   const v = fromPack === null || fromPack === undefined ? Number(process.env.MAX_USD_PER_JOB) || 0 : Number(fromPack) || 0;
   return v > 0 ? v : 0;
 }
+/** ถ้าโจทย์ที่กำลังวิ่งใช้เงินเกินงบ → ปิดโจทย์ (คืน true) */
+function enforceBudget(job) {
+  if (!job || (job.status !== "running" && job.status !== "planning")) return false;
+  const max = budgetFor(job);
+  if (!(max > 0)) return false;
+  const spent = spentSoFar(job);
+  if (spent <= max) return false;
+  failJobForBudget(job, spent, max);
+  return true;
+}
 function spentSoFar(job) {
   return (job.planCostUsd || 0) + job.taskIds.map(getTask).filter(Boolean).reduce((s, t) => s + (t.usage?.costUsd || 0), 0);
 }
@@ -194,20 +204,11 @@ function failJobForBudget(job, spent, max) {
 // ====================================================================
 export function tick() {
   if (!state.settings.autoAssign) return;
-  const checkedJobs = new Set();
+  for (const job of state.jobs.values()) enforceBudget(job); // รวมโจทย์ที่เหลือแต่งานที่กำลังวิ่ง (reviewer ชิ้นสุดท้าย) ด้วย
   for (const task of state.tasks.values()) {
     if (task.status !== "queued") continue;
     const job = getJob(task.jobId);
-    if (!job || (job.status !== "running" && job.status !== "planning")) continue; // งานของโจทย์ที่จบ/ล้มเหลวแล้วไม่มอบหมายต่อ
-    if (!checkedJobs.has(job.id)) {
-      checkedJobs.add(job.id);
-      const max = budgetFor(job);
-      if (max > 0) {
-        const spent = spentSoFar(job);
-        if (spent > max) { failJobForBudget(job, spent, max); continue; }
-      }
-    }
-    if (job.status !== "running") continue;
+    if (!job || job.status !== "running") continue; // งานของโจทย์ที่จบ/ล้มเหลว/กำลังวางแผนไม่มอบหมาย
     if (!depsSatisfied(task)) continue;
     const agent = pickAgent(task);
     if (agent) assign(task, agent);
@@ -330,14 +331,16 @@ async function start(task, agent) {
       signal: ac.signal,
       onProgress: (p) => progress(task, agent, p),
     });
-    if (ac.signal.aborted) return;
+    if (ac.signal.aborted || running.get(task.id) !== ac) return; // ถูกยกเลิก/ส่งต่อ/หยุดไปแล้ว — รอบนี้ไม่ใช่เจ้าของงานอีกต่อไป
     finish(task, agent, result);
   } catch (err) {
-    if (ac.signal.aborted || err?.name === "AbortError") return;
+    if (ac.signal.aborted || err?.name === "AbortError" || running.get(task.id) !== ac) return;
     fail(task, agent, err);
   } finally {
-    running.delete(task.id);
-    progressStamp.delete(task.id);
+    if (running.get(task.id) === ac) { // ลบเฉพาะตัวควบคุมของรอบตัวเอง (รอบใหม่หลัง handoff ต้องยังหยุดได้)
+      running.delete(task.id);
+      progressStamp.delete(task.id);
+    }
   }
 }
 
@@ -411,7 +414,7 @@ function finish(task, agent, result) {
 
 function handleReview(reviewTask, reviewer) {
   const producer = getTask(reviewTask.reviewOfId);
-  if (!producer) return;
+  if (!producer || producer.status !== "done") return; // งานถูกยกเลิก/ทำใหม่ไประหว่างตรวจ → ผลตรวจนี้ไม่มีผล
   const r = reviewTask.review;
   const producerAgent = getAgent(producer.assignedTo);
 
@@ -495,6 +498,7 @@ async function checkJob(jobId) {
   if (!job || job.status !== "running") return;
   const tasks = job.taskIds.map(getTask).filter(Boolean);
   if (!tasks.length || !tasks.every((t) => TERMINAL.has(t.status))) return;
+  if (enforceBudget(job)) return; // การสังเคราะห์เป็นการเรียกที่ใหญ่ที่สุด ต้องอยู่ในงบด้วย
 
   job.status = "synthesizing";
   emitJob("job.updated", job);
@@ -605,6 +609,7 @@ export function retryTask(taskId) {
   if (!task) throw new HttpError(404, "ไม่พบงาน");
   if (!["failed", "cancelled", "done"].includes(task.status)) throw new HttpError(409, "งานนี้ยังไม่จบ ใช้ 'ส่งต่อ' แทน");
   const job = getJob(task.jobId);
+  if (job?.project && !getJobContext(job.id)) throw new HttpError(409, "บริบทโปรเจกต์ของโจทย์นี้ถูกเก็บกวาดไปแล้ว (โจทย์เก่า) — ส่งโจทย์ใหม่แทน");
   if (job && job.status === "failed") {
     const max = budgetFor(job);
     if (max > 0 && spentSoFar(job) > max) {
@@ -641,6 +646,15 @@ export function cancelTask(taskId) {
   task.history.push({ t: now(), type: "cancelled", note: "ผู้ควบคุมยกเลิก" });
   emitTask("task.updated", task);
   bus.log(`🚫 ยกเลิกงาน "${task.title}"`, { taskId: task.id });
+  for (const t of state.tasks.values()) { // งานตรวจที่รอตรวจชิ้นนี้ไม่มีอะไรให้ตรวจแล้ว
+    if (t.reviewOfId === task.id && t.status === "queued") {
+      t.status = "cancelled";
+      t.finishedAt = now();
+      t.phase = "ยกเลิก: งานที่ต้องตรวจถูกยกเลิก";
+      t.history.push({ t: now(), type: "cancelled", note: `ยกเลิกเพราะ "${shorten(task.title, 40)}" ถูกยกเลิก` });
+      emitTask("task.updated", t);
+    }
+  }
   void checkJob(task.jobId);
   tick();
   return task;
