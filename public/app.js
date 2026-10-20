@@ -70,7 +70,7 @@ function patchSection(t) {
 // ---------------------------------------------------------------------------
 const S = {
   mode: "sim",
-  view: "2d", // มุมมองฉาก: "2d" เมืองมอร็อค (scene.js) | "3d" ออฟฟิศ (office3d/ ใน iframe) — จำไว้ใน localStorage
+  view: "3d", // มุมมองฉาก: "3d" ออฟฟิศ (office3d/ ใน iframe, ค่าเริ่มต้น) | "2d" เมืองมอร็อค (scene.js) — จำไว้ใน localStorage
   sceneSel: null, // พนักงานที่ถูกเลือกอยู่ในฉาก 3 มิติ (กันคำสั่ง select ส่งวนไปมาระหว่างหน้าแม่กับ iframe)
   screen: null, // agentId ที่เปิด "หน้าจอการทำงานจริง" อยู่ (popup)
   toolLog: new Map(), // taskId -> [{t, tool, input, result, ok}] จาก task.progress.toolStep (คำค้น/URL/คำสั่ง + ผล)
@@ -700,8 +700,8 @@ function setView(view, { save = true } = {}) {
   if (save) try { localStorage.setItem(VIEW_KEY, view); } catch {}
 }
 function initView() {
-  let v = "2d";
-  try { v = localStorage.getItem(VIEW_KEY) || "2d"; } catch {}
+  let v = "3d"; // ค่าเริ่มต้น = ออฟฟิศ 3 มิติ (เบราว์เซอร์ที่เคยเลือก 2D ไว้จะได้ 2D ตามที่จำ)
+  try { v = localStorage.getItem(VIEW_KEY) || "3d"; } catch {}
   setView(v, { save: false });
   $("#viewSwitch")?.addEventListener("click", (e) => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); });
   window.addEventListener("message", (e) => {
