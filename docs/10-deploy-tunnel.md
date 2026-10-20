@@ -72,16 +72,19 @@ cloudflared tunnel run grock
 
 ให้รันเองตอนเปิดเครื่อง: ตั้ง `npm start` ให้รันอัตโนมัติตามข้อ 3.1 และติดตั้ง cloudflared เป็น Windows service ตามข้อ 3.2 (ลำดับนี้สำคัญ)
 
-### 3.1 ให้ `npm start` รันเองตอนล็อกอิน (Task Scheduler — ไม่ต้องติดตั้งอะไรเพิ่ม)
+### 3.1 ให้เซิร์ฟเวอร์รันเองตอนล็อกอิน (Task Scheduler — ไม่ต้องติดตั้งอะไรเพิ่ม)
 
-สคริปต์อยู่ใน `tools/autostart/`: `install-task.ps1` ลงทะเบียน task ชื่อ **Grock Agent Server** (ทริกเกอร์ตอนล็อกอินของผู้ใช้ปัจจุบัน หน่วง 15 วินาที) ให้รัน `server-autostart.vbs` → `server-autostart.cmd` ซึ่งเปิด `npm start` แบบซ่อนหน้าต่างในโฟลเดอร์โปรเจกต์ (โหลด `.env` ตามปกติ) บันทึก stdout/stderr ลง `logs/server.log` (หมุนไฟล์เมื่อเกิน ~5 MB) และคืน exit code ให้ Task Scheduler รีสตาร์ตให้เองสูงสุด 3 ครั้งถ้าเซิร์ฟเวอร์ล้ม
+สคริปต์อยู่ใน `tools/autostart/`: `install-task.ps1` ลงทะเบียน task ชื่อ **Grock Agent Server** (ทริกเกอร์ตอนล็อกอินของผู้ใช้ปัจจุบัน หน่วง 15 วินาที) ให้รัน `server-autostart.vbs` → `server-autostart.cmd` ซึ่งเปิด `node server/index.js` แบบซ่อนหน้าต่างในโฟลเดอร์โปรเจกต์ (คำสั่งเดียวกับ `npm start` แต่เรียก node ตรง ๆ ไม่ผ่าน npm ให้ process tree ตื้น โหลด `.env` ตามปกติ) บันทึก stdout/stderr ลง `logs/server.log` (หมุนไฟล์เมื่อเกิน ~5 MB) เขียน PID ของ node ลง `logs/server.pid` (ผ่าน `--import tools/autostart/pidfile.mjs`) และคืน exit code ให้ Task Scheduler รีสตาร์ตให้เองสูงสุด 3 ครั้งถ้าเซิร์ฟเวอร์ล้ม
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\autostart\install-task.ps1   # ลงทะเบียน (ไม่ต้องสิทธิ์ผู้ดูแล)
-Start-ScheduledTask -TaskName "Grock Agent Server"   # เริ่มทันทีโดยไม่ต้องล็อกอินใหม่ (ปิด npm start ที่รันค้างอยู่ก่อน ไม่งั้นพอร์ตชน)
-Stop-ScheduledTask -TaskName "Grock Agent Server"    # หยุดเซิร์ฟเวอร์
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\autostart\restart-task.ps1   # รีสตาร์ต — ใช้ทุกครั้งหลังแก้ .env หรืออัปเดตโค้ด (ดูย่อหน้าถัดไป)
+Start-ScheduledTask -TaskName "Grock Agent Server"   # เริ่มทันทีโดยไม่ต้องล็อกอินใหม่ — เฉพาะเมื่อยังไม่มีเซิร์ฟเวอร์รันอยู่ ไม่งั้นพอร์ตชน
+Stop-ScheduledTask -TaskName "Grock Agent Server"    # หยุด task (node ที่เหลืออยู่ต้องปิดเอง — ดูย่อหน้าถัดไป)
 Unregister-ScheduledTask -TaskName "Grock Agent Server" -Confirm:$false   # ถอน
 ```
+
+**รีสตาร์ตหลังแก้ `.env` หรืออัปเดตโค้ด = รัน `restart-task.ps1` คำสั่งเดียว** — `Stop-ScheduledTask` อย่างเดียวหยุดได้แค่ `wscript.exe`/`cmd.exe` แต่ `node` ลูกของมันยังอยู่และยังจองพอร์ต พอ `Start-ScheduledTask` จะได้ node ใหม่ที่ bind พอร์ตไม่ได้ (`EADDRINUSE`) จนต้องไปหา PID จาก `netstat -ano | findstr :3789` แล้ว `Stop-Process` เองทุกครั้ง สคริปต์ทำให้ครบ: หยุด task → ปิด wrapper ที่ค้าง (wscript/cmd ของ `server-autostart.*` ในโฟลเดอร์นี้) และ node ที่พบจาก `logs/server.pid` หรือที่ LISTENING บนพอร์ต (`PORT` ใน `.env` ค่าเริ่มต้น 3789 — ถ้าพอร์ตถูกจองโดยโปรแกรมอื่นที่ไม่ใช่ node จะไม่ปิดให้และบอกเหตุ) → รอพอร์ตว่าง → `Start-ScheduledTask` → รอ `/api/health` ตอบ 200 (ใส่ Basic Auth จาก `AUTH_USER`/`AUTH_PASSWORD` ใน `.env` ให้เอง ไม่พิมพ์รหัสออกหน้าจอ) → สรุป PID เดิม/ใหม่, mode, codeMode ทั้งหมดราว 6–8 วินาที ล้มเหลวได้ exit code ≠ 0 พร้อมเหตุผลและท้าย `logs/server.log` ใช้ได้แม้เซิร์ฟเวอร์เดิมถูกเปิดด้วยมือ (`npm start`) ไม่ใช่ผ่าน task พารามิเตอร์: `-StopTimeoutSec 15 -HealthTimeoutSec 30`
 
 task ทำงานเฉพาะเมื่อผู้ใช้ล็อกอินแล้ว — ถ้าต้องการให้ขึ้นตั้งแต่บูตโดยไม่ต้องล็อกอิน ให้เปิด Task Scheduler → Properties ของ task → ติ๊ก "Run whether user is logged on or not" แล้วใส่รหัสผ่าน Windows ของคุณเอง (ต้องเป็นบัญชีเดียวกับที่ติดตั้ง Claude Code เพราะ Developer โหมดเรียก `claude` CLI ที่อ่าน credentials จากโปรไฟล์ของคุณ) หรือเปิด auto sign-in ของ Windows
 
@@ -95,7 +98,7 @@ Get-Service cloudflared                                               # ต้�
 Get-Content "$env:USERPROFILE\.cloudflared\cloudflared.log" -Tail 20   # ล็อกของ service (ตาม logfile ใน config.yml)
 ```
 
-**ลำดับสำคัญ:** ติดตั้ง service (หรือ `cloudflared tunnel run grock`) *หลังจาก* เซิร์ฟเวอร์ Node บนพอร์ต 3789 รันด้วย `.env` ที่มี `AUTH_PASSWORD` และโดเมนใน `ALLOWED_HOSTS` แล้วเท่านั้น — tunnel ส่งทุกคำขอจากโดเมนเข้า `127.0.0.1:3789` ทันทีที่ต่อได้ ถ้าเซิร์ฟเวอร์ยังเป็นโค้ด/ค่าเก่าที่ไม่ถามรหัส แดชบอร์ดจะเปิดสาธารณะ ขั้นตอนที่ปลอดภัย: หยุด `npm start` เดิม → เปิดใหม่ (`schtasks /Run /TN "Grock Agent Server"` หรือ `npm start`) → ดูบรรทัด `🔒 ต้องใส่รหัสผ่าน … เปิดรับโดเมน: …` → ค่อยติดตั้ง service
+**ลำดับสำคัญ:** ติดตั้ง service (หรือ `cloudflared tunnel run grock`) *หลังจาก* เซิร์ฟเวอร์ Node บนพอร์ต 3789 รันด้วย `.env` ที่มี `AUTH_PASSWORD` และโดเมนใน `ALLOWED_HOSTS` แล้วเท่านั้น — tunnel ส่งทุกคำขอจากโดเมนเข้า `127.0.0.1:3789` ทันทีที่ต่อได้ ถ้าเซิร์ฟเวอร์ยังเป็นโค้ด/ค่าเก่าที่ไม่ถามรหัส แดชบอร์ดจะเปิดสาธารณะ ขั้นตอนที่ปลอดภัย: รีสตาร์ตด้วย `tools\autostart\restart-task.ps1` (ข้อ 3.1 — ปิดตัวเดิมและเปิดใหม่ผ่าน task ให้ครบ) หรือหยุด `npm start` เดิมแล้วเปิดใหม่เอง → ดูบรรทัด `🔒 ต้องใส่รหัสผ่าน … เปิดรับโดเมน: …` → ค่อยติดตั้ง service
 
 ข้อควรระวัง: `cloudflared tunnel run --url http://127.0.0.1:XXXX grock` **ไม่** เปลี่ยนปลายทางของ named tunnel ที่มี `ingress` ใน config.yml (cloudflared ใช้ ingress ต่อไป) ถ้าต้องการทดสอบชี้พอร์ตอื่นชั่วคราว ให้เขียน config อีกไฟล์แล้วรัน `cloudflared --config <ไฟล์นั้น> tunnel run grock`
 
