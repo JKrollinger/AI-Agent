@@ -192,9 +192,25 @@ hermes profile list                  # ต้องเห็น default แล�
 ตอบ jobId ให้ผู้ใช้ทันทีไม่ต้องรอ ถ้าผู้ใช้ถามความคืบหน้าใช้ mcp_grock_job_status ได้ 429 ให้แจ้งผู้ใช้ ห้ามลองซ้ำ ตอบภาษาไทย
 ```
 
-การรัน: โดยค่าเริ่มต้น Hermes ใช้ **multiplexing** (`gateway.multiplex_profiles: true`) — gateway ของโปรไฟล์ default ที่รันอยู่จะรับ adapter ของโปรไฟล์ใหม่ให้เองทันทีที่ `.env` ของโปรไฟล์มีโทเคนบอท (สแกน `profiles/` ทุก 30 วินาที ไม่ต้องรีสตาร์ต) ข้อความถึงบอทของ `grock` จะถูกประมวลผลด้วย config / SOUL / ทักษะ / ความจำ / MCP ของโปรไฟล์ `grock` เท่านั้น ส่วน `hermes -p grock gateway start` แยกโปรเซสถูกปฏิเสธถ้าไม่ใส่ `--force` (หรือตั้ง `gateway.standalone: true` ในโปรไฟล์ ซึ่งเอกสารเรียกว่า shim ชั่วคราว) — ใช้ multiplexing ตามค่าเริ่มต้นดีที่สุด
+**ทางลัด (ทำแล้วบนเครื่องนี้):** หลัง `hermes profile create grock --no-alias` รันสคริปต์ครั้งเดียว (ผู้ใช้รันเอง เพราะมันเขียนค่าลับลงไฟล์ตั้งค่า):
 
-webhook ของโปรไฟล์แยกภายใต้ multiplexing: listener มีตัวเดียว (ของ default) และ route ของโปรไฟล์อยู่ที่ `http://127.0.0.1:8644/p/grock/webhooks/grock` โดย route ต้องประกาศไว้ใน config ของ **โปรไฟล์ default** พร้อม `profile: grock` (โปรไฟล์รองไม่ต้องเปิด `webhook` เอง และ `WEBHOOK_PORT` ของโปรไฟล์รองถูกข้าม) — นี่คือจุดเดียวของทาง ข ที่ต้องแตะ config ของ default (เพิ่ม route 1 รายการ) ถ้าไม่อยากแตะเลย ให้ใช้ `wait_job`/`job_status` แทน webhook เหมือนข้อ 3.1 ขั้น 3
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Projects\AI Agent\Grock Agent\tools\hermes\setup-profile.ps1" -Profile grock -CopyOpenAIKey
+```
+
+[tools/hermes/setup-profile.ps1](../tools/hermes/setup-profile.ps1) สร้างโทเคน API + webhook secret แล้วเขียน (ไม่แสดงค่า ไม่แตะโปรไฟล์ default): `.env` ของศูนย์ควบคุม (`API_TOKENS`, `TOKEN_DAILY_USD`, `JOB_WEBHOOK_URL=http://127.0.0.1:8645/webhooks/grock`, `WEBHOOK_SECRET`), `.env` ของโปรไฟล์ (`TELEGRAM_ALLOWED_USERS`/`TELEGRAM_HOME_CHANNEL` คัดลอกจาก default, `OPENAI_API_KEY` คัดลอกเมื่อใส่ `-CopyOpenAIKey`, `WEBHOOK_ENABLED/PORT=8645/SECRET`, `TELEGRAM_BOT_TOKEN=` เว้นว่างให้วางเอง), `config.yaml` ของโปรไฟล์ (model ตาม default, `skills.external_dirs`, `mcp_servers.grock`, route webhook) และ `SOUL.md` จาก [SOUL.grock.md](../tools/hermes/SOUL.grock.md) · มีอยู่แล้วจะไม่เขียนทับ (ใช้ `-Force` ถ้าต้องการ)
+
+**gateway ของโปรไฟล์: multiplexing หรือแยกโปรเซส** — ขึ้นกับรุ่น Hermes:
+- เอกสารทางการรุ่นล่าสุดบอกว่า multiplexing (`gateway.multiplex_profiles: true`) เป็นค่าเริ่มต้น: gateway ของ default รับ adapter ของโปรไฟล์ใหม่ให้เองทันทีที่ `.env` ของโปรไฟล์มีโทเคนบอท (สแกน `profiles/` ทุก 30 วินาที) ข้อความถึงบอท `grock` ประมวลผลด้วย config/SOUL/ทักษะ/ความจำ/MCP ของโปรไฟล์ `grock` เท่านั้น และ listener webhook มีตัวเดียว (ของ default): route ของโปรไฟล์อยู่ที่ `http://127.0.0.1:8644/p/grock/webhooks/grock` โดยต้องประกาศ route ใน config ของ **default** พร้อม `profile: grock` (`WEBHOOK_PORT` ของโปรไฟล์รองถูกข้าม) ในโหมดนี้ `hermes -p grock gateway start` แยกโปรเซสถูกปฏิเสธถ้าไม่ใส่ `--force`
+- **รุ่นที่ติดตั้งบนเครื่องนี้ (v0.20.2, 2026-08) ค่าเริ่มต้นของ `multiplex_profiles` คือ `false`** (ตรวจจาก `gateway/config.py` ของตัวติดตั้ง) การเปิด multiplexing ต้องแก้ config ของ default + รีสตาร์ต gateway เดิม ซึ่งขัดกับเป้าหมาย "งานเดิมไม่ถูกแตะ" จึงใช้ **gateway แยกโปรเซสของโปรไฟล์ `grock`** แทน: มี webhook listener ของตัวเองที่พอร์ต **8645** (route `http://127.0.0.1:8645/webhooks/grock` ไม่ต้องมี `/p/` และไม่ต้องแตะ config ของ default เลย) รันด้วย
+
+```powershell
+hermes -p grock gateway install     # สร้าง Scheduled Task "Hermes_Gateway_grock" (รันตอนล็อกอิน แยกจาก Hermes_Gateway ของ default) แล้วเริ่มให้
+hermes -p grock gateway status      # หรือ start / stop / restart — log ที่ %LOCALAPPDATA%\hermes\profiles\grock\logs\gateway.log
+```
+
+  ถ้าภายหลังอัปเดต Hermes เป็นรุ่นที่ multiplexing เปิดเป็นค่าเริ่มต้น ให้ `hermes -p grock gateway uninstall` แล้วย้าย route ไปตามข้อแรก (เติม `profile: grock` และเปลี่ยน `JOB_WEBHOOK_URL` เป็น `/p/grock/webhooks/grock` บนพอร์ตของ default)
+- ไม่อยากมี webhook เลย: ไม่ตั้ง `JOB_WEBHOOK_URL` แล้วให้ Hermes ใช้ `wait_job`/`job_status` เหมือนข้อ 3.1 ขั้น 3
 
 ### 3.3 Telegram gateway (บอทใหม่ หรือเครื่องที่ยังไม่มี Hermes)
 
@@ -210,7 +226,7 @@ TELEGRAM_ALLOWED_USERS=123456789        # คั่นด้วย , ไม่�
 TELEGRAM_HOME_CHANNEL=123456789         # แชตที่รับผล cron/webhook เมื่อไม่ระบุ chat_id (หรือพิมพ์ /sethome ในแชต)
 ```
 
-4. โปรไฟล์ default: `hermes gateway setup` (เลือก Telegram) แล้ว `hermes gateway` (หรือ `hermes gateway start`) · โปรไฟล์แยกภายใต้ multiplexing: ไม่ต้องสั่งอะไร gateway เดิมรับให้ (ดู 3.2) · ทักบอทแล้วควรตอบภายในไม่กี่วินาที คำสั่งที่ใช้บ่อย: `/help`, `/new`, `/sethome`, `/whoami`, `/model`, `/reload-mcp`
+4. โปรไฟล์ default: `hermes gateway setup` (เลือก Telegram) แล้ว `hermes gateway` (หรือ `hermes gateway start`) · โปรไฟล์แยก: `hermes -p grock gateway install` (แยกโปรเซส) หรือไม่ต้องสั่งอะไรถ้า multiplexing เปิดอยู่ (ดู 3.2) · ทักบอทแล้วควรตอบภายในไม่กี่วินาที คำสั่งที่ใช้บ่อย: `/help`, `/new`, `/sethome`, `/whoami`, `/model`, `/reload-mcp`
 
 ### 3.4 route รับ webhook แล้วส่งเข้า Telegram
 
