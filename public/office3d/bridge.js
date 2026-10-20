@@ -295,7 +295,7 @@
   }
   function drawScreen(id) {
     const s = screenFor(id); if (!s) return;
-    const { canvas: c, ctx } = s, W = c.width, H = c.height;
+    const { canvas: c, ctx } = s, W = 512, H = 300; ctx.setTransform(c.width / W, 0, 0, c.height / H, 0, 0); // logical 512×300 on a 2× canvas
     const a = store.agents.get(id), e = entries(id)[0];
     const working = a?.status === "working", paused = a?.status === "paused";
     const col = working ? "#3fd1a8" : paused ? "#8b94a3" : "#5b6880";

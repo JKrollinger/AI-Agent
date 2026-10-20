@@ -308,7 +308,7 @@ function workstation(x,z,face,i){
   [[0.24,1.2,0x7ad3e0],[0.18,1.2,0xffe06b],[0.24,1.14,0xff9fb8]].slice(0,1+i%3).forEach(([nx,ny,c])=>{
     const n=add(new THREE.PlaneGeometry(0.05,0.05), mat(c,{roughness:1}), nx,ny,0.0135, mon,{cast:false}); n.rotation.z=(rnd()-0.5)*0.2; });
   // desk name plate at the +x end (canvas, readable from the usual camera side) — text set from the real agent name/role (bridge.js → Office3D.setDeskLabel)
-  const npc=document.createElement('canvas'); npc.width=256; npc.height=64;
+  const npc=document.createElement('canvas'); npc.width=512; npc.height=128; // drawn at 2× of the logical 256×64
   const nptex=new THREE.CanvasTexture(npc); nptex.encoding=THREE.sRGBEncoding; nptex.anisotropy=maxAniso;
   const np=new THREE.Group(); np.position.set(0.6,0.745,0.08*face); np.rotation.y=Math.PI/2; g.add(np);
   add(B(0.27,0.01,0.09),M.black,0,0.005,0,np);
@@ -329,7 +329,7 @@ function workstation(x,z,face,i){
   const bg=new THREE.Group(); bg.position.set(1.08,0,0.1*face); bg.rotation.y=Math.PI/2; g.add(bg);
   add(B(0.3,0.03,0.3),M.black,0,0.015,0,bg); add(B(0.04,1.0,0.04),M.alu,0,0.52,0,bg);
   add(B(0.62,0.48,0.03),M.walnut,0,1.26,0,bg);
-  const bc=document.createElement('canvas'); bc.width=256; bc.height=192;
+  const bc=document.createElement('canvas'); bc.width=512; bc.height=384; // drawn at 2× of the logical 256×192
   const btex=new THREE.CanvasTexture(bc); btex.encoding=THREE.sRGBEncoding; btex.anisotropy=maxAniso;
   const bplane=add(new THREE.PlaneGeometry(0.56,0.42), new THREE.MeshBasicMaterial({map:btex}), 0,1.26,0.017, bg,{cast:false,receive:false});
   const board={canvas:bc,ctx:bc.getContext('2d'),tex:btex,mesh:bplane,notes:[]};
@@ -1498,7 +1498,7 @@ function byId(id){ if(id==null) return null; id=String(id);
 const BOARD_FONT='"IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif';
 const noteReg=new Map(); // noteId -> note object (so an unpin can cancel a paper that is still on its way)
 function drawBoard(b){
-  const {ctx,canvas:c}=b, W=c.width, H=c.height;
+  const {ctx,canvas:c}=b, W=256, H=192; ctx.setTransform(c.width/W,0,0,c.height/H,0,0);
   ctx.fillStyle='#c9a66b'; ctx.fillRect(0,0,W,H);                       // cork
   for(let i=0;i<260;i++){ ctx.fillStyle=`rgba(90,60,30,${0.05+Math.random()*0.08})`; ctx.fillRect(Math.random()*W,Math.random()*H,2,2); }
   ctx.fillStyle='#5a4028'; ctx.fillRect(0,0,W,22); ctx.fillStyle='#f4e9d8'; ctx.font='600 14px '+BOARD_FONT; ctx.textBaseline='middle'; ctx.textAlign='left';
@@ -1522,7 +1522,7 @@ function unpinFrom(w,noteId){ const reg=noteReg.get(noteId); if(reg) reg.cancell
 seats.forEach(s=>{ if(s.board) drawBoard(s.board); });
 function drawPlate(seat,name,role){
   const p=seat&&seat.plate; if(!p || (p.name===name && p.role===role)) return;
-  p.name=name; p.role=role; const {ctx,canvas:c}=p, W=c.width, H=c.height;
+  p.name=name; p.role=role; const {ctx,canvas:c}=p, W=256, H=64; ctx.setTransform(c.width/W,0,0,c.height/H,0,0);
   ctx.fillStyle='#141922'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#f5b942'; ctx.fillRect(0,0,6,H);
   ctx.textBaseline='middle'; ctx.textAlign='left';
   let size=26; ctx.font=`600 ${size}px ${BOARD_FONT}`; while(size>14 && ctx.measureText(name||'').width>W-24){ size-=2; ctx.font=`600 ${size}px ${BOARD_FONT}`; }
@@ -1536,8 +1536,8 @@ const liveScreens={};
 function screenFor(w){
   if(!w||!w.seat||!w.seat.monitor) return null;
   let e=liveScreens[w.agentId];
-  if(!e){ const c=document.createElement('canvas'); c.width=512; c.height=300;
-    const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=maxAniso; tex.minFilter=THREE.LinearFilter;
+  if(!e){ const c=document.createElement('canvas'); c.width=1024; c.height=600; // 2× the logical 512×300 so text stays crisp when the camera zooms in on a desk
+    const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=maxAniso; tex.minFilter=THREE.LinearMipmapLinearFilter; tex.generateMipmaps=true;
     w.seat.monitor.material=new THREE.MeshBasicMaterial({map:tex}); e=liveScreens[w.agentId]={canvas:c,tex}; }
   return e;
 }
