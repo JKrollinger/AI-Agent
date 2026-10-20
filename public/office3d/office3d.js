@@ -1060,8 +1060,23 @@ function attachProp(model,scale,re,mesh,pos){
   let bone=null; model.traverse(o=>{ if(!bone && o.isBone && re.test(o.name)) bone=o; }); if(!bone) return null;
   mesh.scale.setScalar(1/scale); mesh.position.set(pos[0]/scale,pos[1]/scale,pos[2]/scale); mesh.visible=false; bone.add(mesh); return mesh;
 }
+// บางคลิปจาก Mixamo (เช่น "นั่งดื่มน้ำ" ของโมเดลผู้จัดการ) มีการหมุนสะโพกติดมาเกือบครึ่งรอบระหว่างคลิป → ตัวละครนั่งลงแล้วค่อย ๆ หันหลังให้โต๊ะ
+// แก้ที่ต้นทาง: ปรับ track ของ Hips ให้ทิศหัน (yaw รอบแกน Y ของ parent) ตรงกับท่า idle เฟรมแรกทุกเฟรม คงก้ม/เอียงและท่าทางอื่นไว้
+// ยกเว้นคลิปเดิน (ทิศเดินคุมด้วย w.heading อยู่แล้ว) — ทำซ้ำได้ (รอบสองไม่เปลี่ยนอะไร) เพราะ gltf.animations ใช้ร่วมกันระหว่างตัวละครที่ใช้โมเดลเดียวกัน
+function levelHipsYaw(clips){
+  const ref=clips.idle||clips.work; const refTr=ref&&ref.tracks.find(t=>/Hips\.quaternion$/.test(t.name)); if(!refTr) return;
+  const qInv=new THREE.Quaternion().fromArray(refTr.values,0).invert(), Y=new THREE.Vector3(0,1,0);
+  const q=new THREE.Quaternion(), rel=new THREE.Quaternion(), fix=new THREE.Quaternion(), fwd=new THREE.Vector3();
+  for(const name in clips){ if(name==='walk') continue;
+    const tr=clips[name].tracks.find(t=>/Hips\.quaternion$/.test(t.name)); if(!tr||tr.userData_leveled) continue;
+    for(let i=0;i<tr.values.length;i+=4){ q.fromArray(tr.values,i); rel.copy(q).multiply(qInv); fwd.set(0,0,1).applyQuaternion(rel);
+      const yaw=Math.atan2(fwd.x,fwd.z); if(Math.abs(yaw)<1e-3) continue;
+      fix.setFromAxisAngle(Y,-yaw); q.premultiply(fix).normalize(); q.toArray(tr.values,i); }
+    tr.userData_leveled=true; }
+}
 function useModel(w,gltf,cfg){
   const clips={}; gltf.animations.forEach(c=>clips[c.name]=c);
+  levelHipsYaw(clips);
   const scale = 0.95*(cfg.height/1.78)/(hipsY(clips.walk)||hipsY(clips.coffee)||2);
   const model=THREE.SkeletonUtils.clone(gltf.scene);
   model.scale.setScalar(scale);
@@ -1113,12 +1128,82 @@ function poseModel(w,t,dt,sdt){
   w.g.position.copy(w.pos); if(w.cheerT>0 && !w.actions.cheer) w.g.position.y+=Math.abs(Math.sin(t*9))*0.12; w.g.rotation.y=w.heading;
   if(!w.npc) counts[s]=(counts[s]||0)+1;
 }
+const modelLoads=[]; // one promise per person with a model file; each settles (loaded or failed) → portraits are rendered once all have settled
 if(THREE.GLTFLoader && THREE.SkeletonUtils){
   const loader=new THREE.GLTFLoader(), cache={};
   [...workers,visitor].forEach(w=>{ const cfg=MODEL_FILES[w.name]; if(!cfg) return;
-    (cache[cfg.file] ||= new Promise((res,rej)=>loader.load(cfg.file,res,undefined,rej)))
-      .then(g=>{ useModel(w,g,cfg); w.phoneWalk=!!cfg.phoneWalk; }).catch(err=>console.warn('Model failed, keeping the built-in figure:',cfg.file,err)); });
+    modelLoads.push((cache[cfg.file] ||= new Promise((res,rej)=>loader.load(cfg.file,res,undefined,rej)))
+      .then(g=>{ useModel(w,g,cfg); w.phoneWalk=!!cfg.phoneWalk; w.gltf=g; }).catch(err=>console.warn('Model failed, keeping the built-in figure:',cfg.file,err))); });
 }
+
+// ---------- Portraits: a head shot of each person's model for the dashboard's avatars (docs/09-office3d.md §8) ----------
+// Rendered once after every model has loaded or failed: a copy of the model in a standing pose, studio-lit, transparent background,
+// cropped from the top of the hair/hat down to the neck → square PNG data URL (CFG.portraitSize, default 128 px).
+// Sent to the parent page as {type:'office3d:portraits', data:{ <jobId>: dataUrl, … }} (emit → postMessage). People whose model did not
+// load are left out, so the dashboard keeps their emoji. Uses the main renderer with an off-screen target (textures are already on the GPU).
+const PORTRAIT_PX=Math.max(32,Math.min(512,CFG.portraitSize||128)), PORTRAIT_RT=512;
+let portraitMap=null; // null until rendered
+function renderPortrait(w){
+  const model=THREE.SkeletonUtils.clone(w.gltf.scene); model.scale.setScalar(w.scale);
+  model.traverse(o=>{ if(o.isMesh) o.frustumCulled=false; });
+  const ps=new THREE.Scene(); ps.environment=scene.environment; ps.add(model);
+  const clips=w.clips||{}, clip=['idle','talk','coffee','phone','walk','work'].map(n=>clips[n]).find(Boolean);
+  const mixer=new THREE.AnimationMixer(model); if(clip){ mixer.clipAction(clip).play(); mixer.update(0); }
+  model.updateMatrixWorld(true);
+  const bonePos=re=>{ let b=null; model.traverse(o=>{ if(!b && o.isBone && re.test(o.name)) b=o; }); return b ? b.getWorldPosition(new THREE.Vector3()) : null; };
+  const head=bonePos(/Head$/), top=bonePos(/HeadTop_End$/), eyeL=bonePos(/LeftEye$/), eyeR=bonePos(/RightEye$/);
+  const cleanup=()=>{ mixer.stopAllAction(); mixer.uncacheRoot(model); model.traverse(o=>{ if(o.skeleton && o.skeleton.dispose) o.skeleton.dispose(); }); };
+  if(!head){ cleanup(); return null; }
+  const h=top ? Math.max(0.12,top.distanceTo(head)) : 0.2;   // skull height (m) — the Head bone sits at the top of the neck
+  const fwd=new THREE.Vector3(0,0,1);                         // Mixamo faces +z; the eyes (if rigged) tell the real direction
+  if(eyeL && eyeR){ const f=eyeL.clone().add(eyeR).multiplyScalar(0.5).sub(head); f.y=0; if(f.lengthSq()>1e-8) fwd.copy(f.normalize()); }
+  const up=new THREE.Vector3(0,1,0), yaw=(v,a)=>v.clone().applyAxisAngle(up,a);
+  const c=head.clone().addScaledVector(up,0.45*h);              // middle of the face
+  const cam=new THREE.PerspectiveCamera(18,1,0.05,50), d=(3.2*h/2)/Math.tan(THREE.MathUtils.degToRad(9));
+  cam.position.copy(c).addScaledVector(yaw(fwd,0.22),d).addScaledVector(up,0.06*d); cam.lookAt(c);
+  const light=(col,int,dir,lift)=>{ const l=new THREE.DirectionalLight(col,int); l.position.copy(c).addScaledVector(dir,3).addScaledVector(up,lift); l.target.position.copy(c); ps.add(l,l.target); };
+  ps.add(new THREE.HemisphereLight(0xf4f7ff,0x50443a,0.75));
+  light(0xfff3e6,1.7,yaw(fwd,0.7),2.2);   // key: front-left, above
+  light(0xdfe9ff,0.6,yaw(fwd,-1.0),0.4);  // fill: right
+  light(0xffffff,0.9,fwd.clone().negate(),2.5); // rim: behind (separates hair from a dark background)
+  const rt=new THREE.WebGLRenderTarget(PORTRAIT_RT,PORTRAIT_RT); rt.texture.encoding=THREE.sRGBEncoding;
+  const prevRT=renderer.getRenderTarget(), prevCol=renderer.getClearColor(new THREE.Color()), prevA=renderer.getClearAlpha();
+  const px=new Uint8Array(PORTRAIT_RT*PORTRAIT_RT*4);
+  try{ renderer.setRenderTarget(rt); renderer.setClearColor(0x000000,0); renderer.clear(); renderer.render(ps,cam);
+    renderer.readRenderTargetPixels(rt,0,0,PORTRAIT_RT,PORTRAIT_RT,px); }
+  finally{ renderer.setRenderTarget(prevRT); renderer.setClearColor(prevCol,prevA); rt.dispose(); }
+  // WebGL rows run bottom-up; cut-out materials (hair cards, alpha-tested bodies) are drawn fully opaque in the scene, so do the same here
+  const R=PORTRAIT_RT, src=document.createElement('canvas'); src.width=src.height=R;
+  const sctx=src.getContext('2d'), img=sctx.createImageData(R,R);
+  for(let y=0;y<R;y++){ const from=(R-1-y)*R*4, to=y*R*4;
+    for(let i=0;i<R*4;i+=4){ const a=px[from+i+3]; if(!a) continue; img.data[to+i]=px[from+i]; img.data[to+i+1]=px[from+i+1]; img.data[to+i+2]=px[from+i+2]; img.data[to+i+3]=255; } }
+  sctx.putImageData(img,0,0);
+  // crop: from the first opaque row above the face (hair / hat) down to just under the chin, square, centred on the face
+  const toPx=v=>{ const p=v.clone().project(cam); return {x:(p.x+1)/2*R, y:(1-p.y)/2*R}; };
+  const cP=toPx(c), headP=toPx(head), skullPx=Math.max(8,(headP.y-cP.y)/0.45);
+  const x0=Math.max(0,Math.floor(cP.x-1.3*skullPx)), x1=Math.min(R,Math.ceil(cP.x+1.3*skullPx));
+  let topRow=-1;
+  for(let y=0;y<headP.y && topRow<0;y++) for(let x=x0;x<x1;x++) if(img.data[(y*R+x)*4+3]){ topRow=y; break; }
+  if(topRow<0) topRow=cP.y-0.75*skullPx;
+  const bottom=headP.y+0.5*skullPx;
+  let side=Math.min(2.6*skullPx,Math.max(1.45*skullPx,bottom-topRow)); side*=1.08;       // a little air around the head
+  const sy=bottom-side, sx=cP.x-side/2;
+  const out=document.createElement('canvas'); out.width=out.height=PORTRAIT_PX;
+  const octx=out.getContext('2d'); octx.imageSmoothingEnabled=true; octx.imageSmoothingQuality='high';
+  octx.drawImage(src,sx,sy,side,side,0,0,PORTRAIT_PX,PORTRAIT_PX);
+  cleanup();
+  return out.toDataURL('image/png');
+}
+Promise.all(modelLoads).then(()=>{
+  const queue=workers.filter(w=>w.gltf), map={};
+  const next=()=>{ // one person per tick so the first portraits do not stall the scene (each one compiles shaders for the studio lights)
+    const w=queue.shift();
+    if(!w){ portraitMap=map; emit('portraits',Object.assign({},map)); return; }
+    try{ const url=renderPortrait(w); if(url) map[w.jobId||w.agentId]=url; }catch(err){ console.warn('Portrait failed:',w.agentId,err); }
+    setTimeout(next,30);
+  };
+  setTimeout(next,0);
+});
 const tagBtn=document.getElementById('b-tags');
 if(tagBtn) tagBtn.onclick=()=>{ tagsOn=!tagsOn; tagBtn.setAttribute('aria-pressed',tagsOn); };
 function select(w){ selected=w; infoEl.hidden=!w; selRing.visible=!!w; if(w) updateInfo();
@@ -1666,6 +1751,8 @@ const Office3D={
   showRings(on=true){ ringsOn=!!on; workers.forEach(w=>w.ring.visible=ringsOn); },
   showTags(on=true){ tagsOn=!!on; },
   on(ev,f){ (listeners[ev] ||= []).push(f); return ()=>{ listeners[ev]=listeners[ev].filter(x=>x!==f); }; },
+  /** head shots rendered from the models: {<jobId>: 'data:image/png;base64,…'} — null until every model has loaded or failed (then the 'portraits' event fires) */
+  portraits(){ return portraitMap ? Object.assign({},portraitMap) : null; },
 };
 window.Office3D=Office3D;
 // commands from a parent page when embedded in an <iframe>: postMessage({type:'office3d', cmd:'visit', args:['mkt-1','captain',4]}, '*')

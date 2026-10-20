@@ -8,6 +8,7 @@ window.OFFICE3D_CONFIG = {
   eventsUrl: "/api/events",     // SSE endpoint of server/index.js
   clock: "real",                // live mode: "real" = use the wall clock for daylight, "sim" = fast office clock
   modelBase: "models/",         // where the converted Mixamo files live (see tools/office3d/)
+  portraitSize: 128,            // px of the head shots rendered from the models for the dashboard's avatars (32–512) — docs/09-office3d.md §8
 
   // One entry per agent. `id` must match the agent id in server/agents.js (DEFAULT_TEAM).
   // Order = desk order (see `desks`). `model.file` picks the 3D character (any file in models/, swap between people freely);

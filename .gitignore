@@ -20,3 +20,6 @@ Thumbs.db
 public/office3d/models/*
 !public/office3d/models/README.md
 tools/office3d/.bin/
+# ภาพใบหน้าพนักงานที่ผู้ใช้วางเอง (มักเป็นภาพจากเกม/ภาพส่วนตัว) — ดู docs/09-office3d.md §8
+public/office3d/portraits/*
+!public/office3d/portraits/README.md

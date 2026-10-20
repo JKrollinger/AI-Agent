@@ -96,9 +96,34 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg", // office3d character textures
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp", // office3d/portraits/ ที่ผู้ใช้วางเอง
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
 };
+
+// ภาพใบหน้าพนักงานที่ผู้ใช้วางเอง: public/office3d/portraits/<jobId|agentId>.png|webp|jpg (docs/09-office3d.md §8)
+// แดชบอร์ดถาม GET /api/portraits ครั้งเดียวตอนเปิดหน้า แทนการลองโหลดทีละคน (ไม่มีไฟล์ = 404 เจ็ดครั้งใน console ทุกครั้งที่เปิด)
+// ?v=<mtime> ทำให้เปลี่ยนไฟล์แล้วรีเฟรชหน้าก็เห็นภาพใหม่ทันที ไม่ต้องรีสตาร์ตเซิร์ฟเวอร์
+const PORTRAIT_DIR = path.join(PUBLIC_DIR, "office3d", "portraits");
+const PORTRAIT_EXT = [".png", ".webp", ".jpg", ".jpeg"]; // ลำดับ = ลำดับที่เลือกเมื่อมีหลายไฟล์ชื่อเดียวกัน
+function listPortraits() {
+  let names;
+  try { names = fs.readdirSync(PORTRAIT_DIR); } catch { return {}; }
+  const out = {};
+  for (const ext of PORTRAIT_EXT) {
+    for (const f of names) {
+      if (path.extname(f).toLowerCase() !== ext) continue;
+      const key = path.basename(f, path.extname(f)).toLowerCase();
+      if (!/^[a-z0-9_-]{1,64}$/.test(key) || out[key]) continue;
+      try {
+        const st = fs.statSync(path.join(PORTRAIT_DIR, f));
+        if (st.isFile() && st.size > 0) out[key] = `/office3d/portraits/${encodeURIComponent(f)}?v=${Math.round(st.mtimeMs)}`;
+      } catch { /* ไฟล์หายระหว่างอ่าน */ }
+    }
+  }
+  return out;
+}
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -230,6 +255,7 @@ async function handleApi(req, res, url, auth) {
     const agents = [...state.agents.values()].map((a) => ({ id: a.id, name: a.name, nick: a.nick, role: a.role, roleLabel: a.roleLabel, emoji: a.emoji, duties: a.duties, model: a.model, tools: a.tools, status: a.status, canAssign: a.role !== "captain" }));
     return sendJson(res, 200, { agents, roles: [...new Set(agents.filter((a) => a.canAssign).map((a) => a.role))] });
   }
+  if (m === "GET" && pathname === "/api/portraits") return sendJson(res, 200, { portraits: listPortraits() }); // { <jobId|agentId>: URL } ของไฟล์ใน office3d/portraits/
   if (m === "GET" && pathname === "/api/projects") return sendJson(res, 200, { projects: listProjects() });
   if (m === "POST" && pathname === "/api/projects") {
     const body = await readBody(req);

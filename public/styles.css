@@ -113,6 +113,12 @@ button, input { font-family: inherit; font-size: inherit; }
 .avatar-img { image-rendering: pixelated; image-rendering: crisp-edges; width: auto; display: inline-block; vertical-align: middle; }
 .avatar-emoji { font-size: 20px; line-height: 1; }
 .avatar .avatar-img { height: 30px !important; }
+/* ใบหน้าตัวละคร 3 มิติ (app.js avatarHtml) — วงกลม ขอบสีประจำคน (inline border-color) ขนาดจาก width/height ของ <img> */
+.avatar-face { display: inline-block; flex: none; vertical-align: middle; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--line); object-fit: cover; background: radial-gradient(circle at 50% 38%, #2c3852 0%, var(--card-2) 72%); user-select: none; }
+/* ในวง .avatar ที่มีขนาด/ขอบอยู่แล้ว (การ์ดตัวชี้วัด, drawer) → ภาพเต็มวง ไม่ซ้อนขอบ */
+.agent-card .avatar > .avatar-face, .drawer .d-head .avatar > .avatar-face { width: 100%; height: 100%; border: 0; }
+.agent-card .avatar, .drawer .d-head .avatar { flex: none; } /* วงขนาดคงที่ ไม่ถูกบีบในแถว flex (ภาพ % ไม่มีความกว้างขั้นต่ำ) */
+.agent-card .avatar:has(> .avatar-face), .drawer .d-head .avatar:has(> .avatar-face) { overflow: hidden; }
 
 /* ---------- Task strip (การ์ดงานล่าสุดใต้แผนที่) ---------- */
 .strip-wrap { height: 186px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }

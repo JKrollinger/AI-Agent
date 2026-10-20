@@ -483,7 +483,8 @@ function renderDrawer() {
     const active = ["queued", "assigned", "running"].includes(t.status);
     const live = t.status === "running" && who ? S.live.get(who.id) || "" : "";
     const deps = t.dependsOn.map((d) => S.tasks.get(d)).filter(Boolean);
-    html = `<div class="d-head"><div class="avatar" style="border-color:${ri.color}">${ri.emoji}</div>
+    const face = who || S.agents.get(lastAgentOf(t)); // ใบหน้าของคนที่ทำ/เคยทำงานนี้ · ยังไม่มีใคร → อีโมจิประจำตำแหน่ง
+    html = `<div class="d-head"><div class="avatar" style="border-color:${ri.color}">${face ? avatarHtml(face, 30) : ri.emoji}</div>
         <div><h2 style="font-size:14px">${esc(t.title)}</h2><div class="role">${esc(ri.label)} · ${who ? `ผู้รับ: ${esc(who.name)}` : "ยังไม่มอบหมาย"} · รอบที่ ${t.attempts} · ใช้เครื่องมือ <span id="dTools">${t.toolCalls || 0}</span> ครั้ง</div></div>
         <span class="chip ${t.status}" style="margin-left:auto">${STATUS_TH[t.status]}</span>
         ${who ? `<button class="btn small ghost" data-screen="${who.id}" title="หน้าจอการทำงานของ ${esc(who.name)}">🖥️ หน้าจอ</button>` : ""}
@@ -653,15 +654,85 @@ function renderScreen(force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// รูปแทนตัว (อีโมจิประจำตำแหน่ง) ใน roster/การ์ด/drawer — ตัวละครจริงอยู่ในฉาก 3 มิติ
+// รูปแทนตัวใน roster/การ์ดตัวชี้วัด/drawer/⚙ ตั้งค่า/การ์ดงาน/หน้าจอการทำงาน = ใบหน้าตัวละคร 3 มิติของคนนั้น (docs/09-office3d.md §8)
+//   1) ไฟล์ที่ผู้ใช้วางเอง public/office3d/portraits/<jobId>.png (หรือ <agentId>) — GET /api/portraits บอกว่ามีไฟล์ไหน
+//   2) ภาพศีรษะที่ฉาก 3 มิติเรนเดอร์จากโมเดล (postMessage office3d:portraits) — จำใน localStorage ให้ขึ้นทันทีเมื่อเปิดหน้าครั้งถัดไป
+//   3) ไม่มีทั้งสองอย่าง → อีโมจิประจำตำแหน่งเดิม
+// ทุกภาพถูก decode เสร็จก่อนสลับเข้า DOM (ไม่กะพริบ) และถ้าโหลดไม่ได้จะกลับเป็นอีโมจิเอง
 // ---------------------------------------------------------------------------
-const avatarHtml = (a) => `<span class="avatar-emoji">${a.emoji || "👤"}</span>`;
+const PORTRAIT_CACHE = "grock.portraits";
+const PORTRAIT_KEY = /^[\w-]{1,64}$/;
+const portraits = { files: {}, rendered: {}, blobs: [], bad: new Set(), gen: 0 }; // rendered = blob: URL (สั้น ใช้ใน innerHTML ทุกรอบได้ไม่หนัก)
+function portraitOf(a) {
+  const keys = [a.jobId, a.id].filter(Boolean);
+  for (const src of [...keys.map((k) => portraits.files[k]), ...keys.map((k) => portraits.rendered[k])]) if (src && !portraits.bad.has(src)) return src;
+  return null;
+}
+const avatarHtml = (a, size = 30) => {
+  const src = portraitOf(a);
+  return src
+    ? `<img class="avatar-face" data-face="${esc(a.id)}" data-size="${size}" src="${esc(src)}" width="${size}" height="${size}" alt="" draggable="false" style="border-color:${a.color || "var(--line)"}">`
+    : `<span class="avatar-emoji" data-face="${esc(a.id)}" data-size="${size}">${a.emoji || "👤"}</span>`;
+};
+/** สลับรูปแทนตัวที่แสดงอยู่แล้วทั้งหน้าให้ตรงกับภาพล่าสุด โดยไม่ render แผงใหม่ (ช่องที่พิมพ์ค้างใน ⚙ ตั้งค่าไม่หาย) */
+function refreshFaces() {
+  document.querySelectorAll("[data-face]").forEach((el) => {
+    const a = S.agents.get(el.dataset.face); if (!a) return;
+    const want = portraitOf(a);
+    if (el.tagName === "IMG" ? el.getAttribute("src") === want : !want) return;
+    el.outerHTML = avatarHtml(a, Number(el.dataset.size) || 30);
+  });
+}
+/** โหลด + decode ภาพก่อนใช้ — ได้ true เมื่อพร้อมแสดง */
+const preload = (src) => new Promise((ok) => { const im = new Image(); im.onload = () => (im.decode ? im.decode().then(() => ok(true), () => ok(true)) : ok(true)); im.onerror = () => ok(false); im.src = src; });
+function dataUrlToBlobUrl(u) {
+  const m = /^data:(image\/(?:png|webp|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(u); if (!m) return null;
+  const bin = atob(m[2]), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: m[1] }));
+}
+/** ภาพจากฉาก 3 มิติ (ชุดเต็ม แทนที่ชุดเดิม — คนที่หายไป เช่น ลบโมเดลออก จะกลับเป็นอีโมจิ) */
+async function setRenderedPortraits(map, { save = true } = {}) {
+  const gen = ++portraits.gen, next = {}, made = [];
+  for (const [k, v] of Object.entries(map || {})) {
+    if (!PORTRAIT_KEY.test(k) || typeof v !== "string" || v.length > 2_000_000) continue;
+    const url = dataUrlToBlobUrl(v); if (!url) continue;
+    made.push(url);
+    if (await preload(url)) next[k] = url;
+  }
+  if (gen !== portraits.gen) { made.forEach((u) => URL.revokeObjectURL(u)); return; } // มีชุดใหม่กว่ามาระหว่าง decode (เช่น แคชเก่า vs ภาพสดจากฉาก)
+  const old = portraits.blobs;
+  portraits.rendered = next; portraits.blobs = made;
+  refreshFaces();
+  setTimeout(() => old.forEach((u) => URL.revokeObjectURL(u)), 1000); // รอให้ <img> ที่ถูกแทนที่ปล่อย URL เก่าก่อน
+  if (save) try {
+    const keep = Object.fromEntries(Object.entries(map || {}).filter(([k]) => next[k]));
+    if (Object.keys(keep).length) localStorage.setItem(PORTRAIT_CACHE, JSON.stringify(keep)); else localStorage.removeItem(PORTRAIT_CACHE);
+  } catch { /* storage เต็ม/ถูกปิด — ใช้ได้แค่รอบนี้ */ }
+}
+async function initPortraits() {
+  document.addEventListener("error", (e) => { // ภาพเสีย/ถูกลบระหว่างใช้ → อีโมจิ
+    const el = e.target;
+    if (!(el instanceof HTMLImageElement) || !el.classList.contains("avatar-face")) return;
+    portraits.bad.add(el.getAttribute("src")); refreshFaces();
+  }, true);
+  try { const cached = JSON.parse(localStorage.getItem(PORTRAIT_CACHE) || "null"); if (cached) setRenderedPortraits(cached, { save: false }); } catch { /* แคชเสีย */ }
+  try {
+    const res = await fetch("/api/portraits", { cache: "no-store" });
+    if (!res.ok) return; // เซิร์ฟเวอร์รุ่นเก่ายังไม่มี endpoint นี้ → ใช้ภาพจากฉาก 3 มิติอย่างเดียว
+    const files = {};
+    for (const [k, src] of Object.entries((await res.json()).portraits || {})) {
+      if (PORTRAIT_KEY.test(k) && typeof src === "string" && src.startsWith("/office3d/portraits/") && (await preload(src))) files[k] = src;
+    }
+    portraits.files = files; refreshFaces();
+  } catch { /* ออฟไลน์ — ใช้อีโมจิ/ภาพจากฉาก */ }
+}
 function frame() { if (dirty.size) flush(); requestAnimationFrame(frame); }
 
 // ---------------------------------------------------------------------------
 // ฉากออฟฟิศ 3 มิติ (public/office3d/ ใน iframe) — เวทีเดียวของแดชบอร์ด
 // iframe ต่อ /api/events ของตัวเอง จึงไม่ต้องส่งสถานะเข้าไป; คุยกันด้วย postMessage (ดู docs/09-office3d.md §4):
-//   แม่ → ลูก {type:"office3d", cmd, args}   ลูก → แม่ {type:"office3d:ready"|"office3d:select"|"office3d:screen", data}
+//   แม่ → ลูก {type:"office3d", cmd, args}   ลูก → แม่ {type:"office3d:ready"|"office3d:select"|"office3d:screen"|"office3d:portraits", data}
 // ---------------------------------------------------------------------------
 const office = {
   frame: $("#office3d"),
@@ -675,6 +746,7 @@ function initOffice() {
     const d = e.data || {};
     if (d.type === "office3d:ready") { office.ready = true; return; }
     if (d.type === "office3d:screen") { if (d.data?.agentId) openScreen(d.data.agentId); return; } // แตะจอคอมของคนนั้น
+    if (d.type === "office3d:portraits") { setRenderedPortraits(d.data); return; } // ภาพศีรษะที่ฉากเรนเดอร์จากโมเดล → รูปแทนตัวทุกที่
     if (d.type === "office3d:select") { // ผู้ใช้แตะตัวละคร (หรือพื้นว่าง = null) ในฉาก 3 มิติ
       const id = d.data?.agentId || null;
       S.sceneSel = id;
@@ -853,5 +925,6 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.screen) return closeScreen(); closeDrawer(); closeSettings(); } });
 initOffice();
+initPortraits();
 connect();
 requestAnimationFrame(frame);
