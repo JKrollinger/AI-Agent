@@ -25,8 +25,22 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(-0.5,0.4,0);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI*0.45;
-controls.minDistance = 6; controls.maxDistance = 55;
+controls.minDistance = 2.5; controls.maxDistance = 55;
 controls.autoRotate = true; controls.autoRotateSpeed = 0.3;
+// free camera: left-drag = orbit · right-drag / two fingers = pan along the floor · wheel / pinch = zoom · arrow keys = pan
+controls.enablePan = true; controls.screenSpacePanning = false; controls.panSpeed = 1.1; controls.keyPanSpeed = 18;
+if(controls.listenToKeyEvents) controls.listenToKeyEvents(window);
+const HOME = { pos: camera.position.clone(), target: controls.target.clone() };
+// smooth camera moves (focus on a desk / back to the home view) — cancelled as soon as the user grabs the camera
+let camTween=null;
+function flyTo(pos,target,dur=0.9){ camTween={start:performance.now(),dur,p0:camera.position.clone(),p1:pos.clone(),g0:controls.target.clone(),g1:target.clone()}; } // wall-clock based so a slow frame rate cannot stretch it
+function focusOn(w,dist=5.5){ if(!w||!w.seat) return false;
+  const tgt=new THREE.Vector3(w.seat.x,0.9,w.seat.z);
+  const dir=camera.position.clone().sub(controls.target); dir.y=Math.max(dir.y,0.35*dir.length()); dir.setLength(dist);
+  const pos=tgt.clone().add(dir); if(pos.y<2.0) pos.y=2.0;
+  controls.autoRotate=false; flyTo(pos,tgt,0.9); return true; }
+function resetView(){ flyTo(HOME.pos,HOME.target,1.0); controls.autoRotate=!matchMedia('(prefers-reduced-motion: reduce)').matches; }
+controls.addEventListener('start',()=>{ controls.autoRotate=false; camTween=null; }); // the user took over
 
 function applyTheme(){
   const bg = new THREE.Color(css('--bg'));
@@ -292,9 +306,17 @@ function workstation(x,z,face,i){
   if(i%3===0) add(B(0.07,0.008,0.15),M.black, 0.36,0.765,0.02*fwd, g);
   [[0.24,1.2,0x7ad3e0],[0.18,1.2,0xffe06b],[0.24,1.14,0xff9fb8]].slice(0,1+i%3).forEach(([nx,ny,c])=>{
     const n=add(new THREE.PlaneGeometry(0.05,0.05), mat(c,{roughness:1}), nx,ny,0.0135, mon,{cast:false}); n.rotation.z=(rnd()-0.5)*0.2; });
+  // task pinboard on a stand at the end of the desk: the captain pins assignments here (bridge.js → Office3D.pin), the worker takes them to hand in
+  const bg=new THREE.Group(); bg.position.set(1.08,0,0.1*face); bg.rotation.y=Math.PI/2; g.add(bg);
+  add(B(0.3,0.03,0.3),M.black,0,0.015,0,bg); add(B(0.04,1.0,0.04),M.alu,0,0.52,0,bg);
+  add(B(0.62,0.48,0.03),M.walnut,0,1.26,0,bg);
+  const bc=document.createElement('canvas'); bc.width=256; bc.height=192;
+  const btex=new THREE.CanvasTexture(bc); btex.encoding=THREE.sRGBEncoding; btex.anisotropy=maxAniso;
+  const bplane=add(new THREE.PlaneGeometry(0.56,0.42), new THREE.MeshBasicMaterial({map:btex}), 0,1.26,0.017, bg,{cast:false,receive:false});
+  const board={canvas:bc,ctx:bc.getContext('2d'),tex:btex,mesh:bplane,notes:[]};
   const sz = z+0.74*face;
   officeChair(x+(rnd()-0.5)*0.08, sz, face);
-  seats.push({x, z:sz, h: face>0?Math.PI:0, monitor:scr});
+  seats.push({x, z:sz, h: face>0?Math.PI:0, monitor:scr, board});
 }
 let wi=0;
 // 7 desks for the team: two facing pairs at the back, a pair and a single desk at the front
@@ -842,9 +864,16 @@ renderer.domElement.addEventListener('pointerup',e=>{
   ndc.set((e.clientX-r.left)/r.width*2-1, -(e.clientY-r.top)/r.height*2+1);
   ray.setFromCamera(ndc,camera);
   const hit=ray.intersectObjects(pickables,false)[0];
-  if(hit && hit.object.userData.screen){ const w=hit.object.userData.w; emit('screen',{agentId:w.agentId,name:w.name}); return; } // monitor → work-screen popup
-  select(hit? hit.object.userData.w : null);
+  if(hit && hit.object.userData.screen){ const w=hit.object.userData.w; focusOn(w); emit('screen',{agentId:w.agentId,name:w.name}); return; } // monitor → zoom in + work-screen popup
+  const w=hit? hit.object.userData.w : null; if(w) focusOn(w);
+  select(w);
 });
+renderer.domElement.addEventListener('dblclick',e=>{ // double-tap on empty floor → back to the overview
+  const r=renderer.domElement.getBoundingClientRect();
+  ndc.set((e.clientX-r.left)/r.width*2-1, -(e.clientY-r.top)/r.height*2+1); ray.setFromCamera(ndc,camera);
+  if(!ray.intersectObjects(pickables,false).length) resetView();
+});
+addEventListener('keydown',e=>{ if(e.key==='Home') resetView(); });
 const infoEl=document.getElementById('info');
 const tagsEl=document.getElementById('tags'); let tagsOn=true;
 const TAG_ST={rest:'ว่าง',visit:'คุยงาน',work:'กำลังทำงาน',meet:'ประชุม',coffee:'พักกาแฟ',print:'พิมพ์เอกสาร',lounge:'พักผ่อน',phone:'คุยโทรศัพท์',walk:'กำลังเดิน',guest:'ติดต่องาน'};
@@ -1027,10 +1056,10 @@ function route(w,to,door,prev){
 }
 const taken=new Set();
 function freeSpot(list){ const f=list.filter(s=>!taken.has(s)); return f.length?f[Math.floor(Math.random()*f.length)]:null; }
-function goTo(w,spot,state,door){
+function goTo(w,spot,state,door,say,pin){
   const prev=w.spot; if(prev) taken.delete(prev);
   w.spot=spot===w.seat?null:spot; if(w.spot) taken.add(w.spot);
-  w.path=route(w,spot,door,prev); w.after={state,h:spot.h}; w.state='walk';
+  w.path=route(w,spot,door,prev); w.after={state,h:spot.h,say,pin}; w.state='walk'; // `say` = bubble on arrival (e.g. "มอบหมาย: …"), `pin` = paper for the other person's board
 }
 let meeting={active:false,t:30};
 function startMeeting(){
@@ -1070,23 +1099,42 @@ function visitSpotFor(w,tw){
   const base=tw.seat, side=(w.id<tw.id?1:-1);
   return {x:base.x+0.8*side, z:base.z, h:Math.atan2(-side,0)};
 }
+const atDeskSoon=tw=>tw && (tw.state==='work'||tw.state==='rest'||(tw.state==='walk'&&tw.after&&(tw.after.state==='work'||tw.after.state==='rest')));
+// returns true = walking now · 'wait' = the other person is away (meeting / handing out work / sofa): stay at your own desk and retry · false = drop
 function runCommand(w,c){
   if(c.type==='visit'){
     const tw=byId(c.target); if(!tw||tw===w) return false;
-    const atDesk=st=>st==='work'||st==='rest';
-    if(!(atDesk(tw.state) || (tw.state==='walk' && tw.after && atDesk(tw.after.state)))) return false; // they're away: skip the walk
-    w.visitT=c.secs||4; w.visitWith=tw.agentId; const vs=visitSpotFor(w,tw); goTo(w,vs,'visit',roomDoorFor(vs)); return true;
+    if(c.pin && c.pin.cancelled) return false;            // the task ended before the paper could be delivered
+    if(!atDeskSoon(tw)) return 'wait';
+    w.visitT=c.secs||4; w.visitWith=tw.agentId; w.waitFor=null; w.waitT=0; w.pendingSay=null; w.pendingPin=null;
+    const vs=visitSpotFor(w,tw); goTo(w,vs,'visit',roomDoorFor(vs),c.say,c.pin); return true;
   }
   if(c.type==='go'){ return sendTo(w,c.place); }
   return false;
 }
+const VISIT_WAIT_MAX=90; // seconds: how long to keep retrying a visit / to wait if the other person stepped away just as you arrived
 function decide(w){
   if(w.goLater){ w.timer=2; return; }
   if(w.pin){
     if(w.pin.until!==null && simTime>=w.pin.until) w.pin=null;
     else { if(placeOf(w)!==w.pin.place) sendTo(w,w.pin.place); w.timer=2; return; }
   }
-  while(w.queue.length){ if(runCommand(w,w.queue.shift())) return; }
+  if(MODE==='live' && w.agentId==='captain'){ // people are waiting at the manager's desk to hand work in: come back and receive them before the next errand
+    // guests = people already at his desk or walking over to hand in; those still waiting at their own desks come once he is back between errands
+    const guests=workers.filter(o=>o!==w && o.visitWith===w.agentId && (o.state==='visit' || (o.state==='walk' && o.after && o.after.state==='visit')));
+    if(guests.length){
+      if(w.state==='work'||w.state==='rest'){ w.timer=1; return; }   // at the desk: stay until they have come and gone
+      sendTo(w,'desk'); return;                                       // out on an errand: go back first, the next errand waits
+    }
+  }
+  while(w.queue.length){
+    const c=w.queue[0], r=runCommand(w,c);
+    if(r==='wait'){ // they're away: keep the errand, check again in 1.5 s — meanwhile sit and work if a task is already running
+      c.waited=(c.waited||0)+1; if(c.waited>VISIT_WAIT_MAX/1.5){ if(c.pin) pinOn(byId(c.target),c.pin); w.queue.shift(); continue; }
+      w.timer=1.5; if(MODE==='live' && w.live.status==='working' && w.state!=='work') sendTo(w,'desk'); return;
+    }
+    w.queue.shift(); if(r) return;
+  }
   if(MODE==='live'){
     const st=w.live.status;
     if(st==='working'){ if(w.state!=='work') sendTo(w,'desk'); w.timer=3; return; }
@@ -1128,17 +1176,28 @@ function step(dt){
       if(w.goLater.t<=0){ const g=w.goLater; w.goLater=null; goTo(w,g.spot,g.state,g.door); } }
     if(w.state==='walk'){
       if(walkStep(w,dt)){ { w.state=w.after.state; w.face=w.after.h;
+          if(w.state==='visit'){ const tw=byId(w.visitWith), here=tw&&(tw.state==='work'||tw.state==='rest');
+            if(here){ if(w.after.say){ w.bubbleText=w.after.say; w.bubbleT=Math.max(3,(w.visitT||3)+0.5)*60; } if(w.after.pin) pinOn(tw,w.after.pin); }
+            else { w.waitFor=w.visitWith; w.waitT=0; w.pendingSay=w.after.say||null; w.pendingPin=w.after.pin||null; } }
+          else if(w.after.say){ w.bubbleText=w.after.say; w.bubbleT=3*60; }
           if(w.state==='coffee') w.cups++; if(w.state==='meet') w.meets++;
           w.timer = w.state==='work'?18+Math.random()*20 : w.state==='coffee'?12+Math.random()*12 : w.state==='print'?5+Math.random()*4
                   : w.state==='lounge'?20+Math.random()*20 : w.state==='phone'?12+Math.random()*14
                   : w.state==='rest'?15+Math.random()*15 : w.state==='visit'?(w.visitT||4) : 999; w.timerTotal=w.timer;
           if(MODE==='live' && w.state==='work') w.timer=3;
+          if(w.state==='visit' && w.waitFor) w.timer=VISIT_WAIT_MAX+1; // waiting for them to come back — the talk timer starts when they do
           if(w.queue.length || w.pin) w.timer=Math.min(w.timer,0.6);
           if(MODE==='live' && w.state==='meet' && !w.pin) w.timer=Math.min(w.timer,1);
           // arrived at a break spot after a job started (or while still holding a task) → re-decide at once and head back to the desk
           if(MODE==='live' && !w.pin && ['coffee','lounge','phone','print'].includes(w.state) && (JOBS_ACTIVE || w.live.status==='working')) w.timer=Math.min(w.timer,0.6); }
       }
-    } else if(w.state!=='meet' || w.pin || w.queue.length || MODE==='live'){ w.timer-=dt; if(w.timer<=0) decide(w); }
+    } else if(w.state!=='meet' || w.pin || w.queue.length || MODE==='live'){
+      if(w.state==='visit' && w.waitFor){ // standing at the other person's desk: start talking the moment they are back; leave after VISIT_WAIT_MAX s
+        const tw=byId(w.waitFor);
+        if(tw && (tw.state==='work'||tw.state==='rest')){ w.waitFor=null; w.timer=w.visitT||4; if(w.pendingSay){ w.bubbleText=w.pendingSay; w.bubbleT=(w.timer+0.5)*60; w.pendingSay=null; } if(w.pendingPin){ pinOn(tw,w.pendingPin); w.pendingPin=null; } }
+        else { w.waitT+=dt; if(w.waitT>VISIT_WAIT_MAX){ if(w.pendingPin) pinOn(tw,w.pendingPin); w.waitFor=null; w.pendingSay=null; w.pendingPin=null; w.timer=0.3; } }
+      }
+      w.timer-=dt; if(w.timer<=0) decide(w); }
     let dh=w.face-w.heading; dh=Math.atan2(Math.sin(dh),Math.cos(dh)); w.heading+=dh*Math.min(1,dt*8);
   });
   updateVisitor(dt);
@@ -1353,6 +1412,8 @@ function frame(now){
   updateDetails(dt*(paused?0:speed), t, hour, printing);
   updateTags(t);
   if(selected){ selRing.position.set(selected.pos.x,0.025,selected.pos.z); updateInfo(); }
+  if(camTween){ const k=Math.min(1,(now-camTween.start)/1000/camTween.dur), e=k<0.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    camera.position.lerpVectors(camTween.p0,camTween.p1,e); controls.target.lerpVectors(camTween.g0,camTween.g1,e); if(k>=1) camTween=null; }
   controls.update(); renderer.render(scene,camera);
   requestAnimationFrame(frame);
 }
@@ -1366,6 +1427,32 @@ function emit(ev,data){ (listeners[ev]||[]).forEach(f=>{ try{ f(data); }catch(e)
   if(window.parent!==window) try{ window.parent.postMessage({type:'office3d:'+ev, data}, '*'); }catch(e){} }
 function byId(id){ if(id==null) return null; id=String(id);
   return workers.find(w=>w.agentId===id) || workers.find(w=>w.jobId===id) || workers.find(w=>w.name===id) || null; }
+// ---------- Desk pinboards: the papers the captain pinned (one per active task) ----------
+const BOARD_FONT='"IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif';
+const noteReg=new Map(); // noteId -> note object (so an unpin can cancel a paper that is still on its way)
+function drawBoard(b){
+  const {ctx,canvas:c}=b, W=c.width, H=c.height;
+  ctx.fillStyle='#c9a66b'; ctx.fillRect(0,0,W,H);                       // cork
+  for(let i=0;i<260;i++){ ctx.fillStyle=`rgba(90,60,30,${0.05+Math.random()*0.08})`; ctx.fillRect(Math.random()*W,Math.random()*H,2,2); }
+  ctx.fillStyle='#5a4028'; ctx.fillRect(0,0,W,22); ctx.fillStyle='#f4e9d8'; ctx.font='600 14px '+BOARD_FONT; ctx.textBaseline='middle'; ctx.textAlign='left';
+  ctx.fillText('งานที่ได้รับมอบหมาย', 8, 11); ctx.textAlign='right'; ctx.fillText(b.notes.length? b.notes.length+' ใบ':'', W-8, 11); ctx.textAlign='left';
+  if(!b.notes.length){ ctx.fillStyle='rgba(60,40,20,.55)'; ctx.font='500 15px '+BOARD_FONT; ctx.fillText('— ว่าง —', 12, 60); }
+  b.notes.slice(0,3).forEach((n,i)=>{
+    const y=30+i*52, tilt=(i%2?-1:1)*0.03;
+    ctx.save(); ctx.translate(12,y); ctx.rotate(tilt);
+    ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fillRect(3,3,232,46); ctx.fillStyle=n.attempts>1?'#ffd9a8':'#fff3a8'; ctx.fillRect(0,0,232,46);
+    ctx.fillStyle='#d9332b'; ctx.beginPath(); ctx.arc(116,5,4,0,Math.PI*2); ctx.fill(); // pin
+    ctx.fillStyle='#2a2118'; ctx.font='600 15px '+BOARD_FONT; ctx.fillText(String(n.title||'').slice(0,26), 8, 18);
+    ctx.fillStyle='#6b5a44'; ctx.font='12px '+BOARD_FONT; ctx.fillText((n.attempts>1?`รอบที่ ${n.attempts} · `:'')+(n.from&&n.from!=='captain'?`จาก ${n.from}`:'จากกัปตัน'), 8, 36);
+    ctx.restore();
+  });
+  b.tex.needsUpdate=true;
+}
+function pinOn(w,note){ const b=w&&w.seat&&w.seat.board; if(!b||!note||note.cancelled) return false;
+  b.notes=b.notes.filter(n=>n.id!==note.id); b.notes.unshift(note); noteReg.set(note.id,note); drawBoard(b); return true; }
+function unpinFrom(w,noteId){ const reg=noteReg.get(noteId); if(reg) reg.cancelled=true; noteReg.delete(noteId); // also cancels a paper still on its way
+  const b=w&&w.seat&&w.seat.board; if(!b) return false; const n=b.notes.length; b.notes=b.notes.filter(x=>x.id!==noteId); if(b.notes.length!==n) drawBoard(b); return true; }
+seats.forEach(s=>{ if(s.board) drawBoard(s.board); });
 // live desk monitors: one canvas texture per team member, replacing the static screen art on their own monitor
 const liveScreens={};
 function screenFor(w){
@@ -1378,6 +1465,8 @@ function screenFor(w){
 }
 function kick(w){
   if(w.state!=='walk'){ if(!w.goLater) w.timer=0; return; }
+  // released from the meeting room while still walking there, with visits queued (the captain handing out the plan): turn round now
+  if(MODE==='live' && !w.pin && w.queue.length && w.after && w.after.state==='meet'){ decide(w); return; }
   // got a task while heading for a break: turn round and go back to the desk
   if(MODE==='live' && w.live.status==='working' && !w.pin && !w.queue.length && w.after && !['work','visit','meet'].includes(w.after.state)) goTo(w,w.seat,'work',roomDoorFor(w.seat));
 }
@@ -1399,9 +1488,15 @@ const Office3D={
     if(MODE==='live' && w.live.status!==before) kick(w);
     return true;
   },
-  /** walk from one agent to another's desk, talk for `secs`, then carry on (e.g. handing over work) */
-  visit(fromId,toId,secs=4){ const w=byId(fromId), tw=byId(toId); if(!w||!tw||w===tw) return false;
-    w.queue.push({type:'visit',target:tw.agentId,secs}); if(w.queue.length>3) w.queue.shift(); kick(w); return true; },
+  /** walk from one agent to another's desk, stay `secs` (saying `say` on arrival), then carry on — e.g. the captain handing out work, or someone handing it in.
+   *  `pin` = {id, title, attempts, from}: a paper pinned on the other person's desk board when the visitor arrives (the captain's assignment) */
+  visit(fromId,toId,secs=4,say=null,pin=null){ const w=byId(fromId), tw=byId(toId); if(!w||!tw||w===tw) return false;
+    if(pin) noteReg.set(pin.id,pin);
+    w.queue.push({type:'visit',target:tw.agentId,secs,say,pin}); if(w.queue.length>8) w.queue.shift(); kick(w); return true; },
+  /** put / remove a task paper on someone's desk board without walking (snapshot, task done/cancelled/handed over) */
+  pin(id,note){ return pinOn(byId(id),note); },
+  unpin(id,noteId){ return unpinFrom(byId(id),noteId); },
+  boardNotes(id){ const w=byId(id); return w&&w.seat&&w.seat.board ? w.seat.board.notes.map(n=>Object.assign({},n)) : []; },
   /** send someone to a place: 'desk' | 'meeting' | 'coffee' | 'printer' | 'lounge' | 'phone' */
   goTo(id,place){ const w=byId(id); if(!w||!PLACES[place]) return false; w.queue.push({type:'go',place}); kick(w); return true; },
   /** keep someone at a place for `secs` (null = until release) */
@@ -1425,7 +1520,11 @@ const Office3D={
   _monitorXY(id){ const w=byId(id); if(!w||!w.seat||!w.seat.monitor) return null; const v=new THREE.Vector3(); w.seat.monitor.getWorldPosition(v); v.project(camera);
     const r=renderer.domElement.getBoundingClientRect(); return {x:r.left+(v.x*0.5+0.5)*r.width, y:r.top+(-v.y*0.5+0.5)*r.height, visible:v.z<1}; },
   agents(){ return workers.map(w=>({id:w.agentId,name:w.name,role:w.role,state:w.state,live:Object.assign({},w.live),x:+w.pos.x.toFixed(2),z:+w.pos.z.toFixed(2)})); },
-  select(id){ select(byId(id)); },
+  select(id){ const w=byId(id); select(w); if(w) focusOn(w); },
+  /** camera: zoom in on someone's desk (smooth) / back to the overview (also: double-tap the floor, Home key) */
+  focus(id,dist){ return focusOn(byId(id),dist); },
+  resetView(){ resetView(); return true; },
+  _cam(){ return {pos:camera.position.toArray().map(v=>+v.toFixed(2)),target:controls.target.toArray().map(v=>+v.toFixed(2)),autoRotate:controls.autoRotate}; },
   setSpeed(n){ speed=Math.max(1,Math.min(4,n|0)); },
   pause(on=true){ paused=!!on; },
   /** camera auto-rotate, status rings on the floor, name tags — the dashboard toggles these instead of on-page buttons */

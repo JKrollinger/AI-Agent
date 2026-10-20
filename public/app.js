@@ -704,6 +704,7 @@ function initView() {
   try { v = localStorage.getItem(VIEW_KEY) || "3d"; } catch {}
   setView(v, { save: false });
   $("#viewSwitch")?.addEventListener("click", (e) => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); });
+  $("#camReset")?.addEventListener("click", () => office.send("resetView")); // กลับมุมกล้องเริ่มต้นของฉาก 3 มิติ
   window.addEventListener("message", (e) => {
     if (!office.frame || e.source !== office.frame.contentWindow || e.origin !== location.origin) return; // รับเฉพาะจาก iframe ของเราเอง
     const d = e.data || {};

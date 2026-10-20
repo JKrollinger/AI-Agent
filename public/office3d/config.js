@@ -52,8 +52,8 @@ window.OFFICE3D_CONFIG = {
 
   // What the scene does on server events (bridge.js). Set an entry to false to turn it off. Full table: docs/09-office3d.md §2
   reactions: {
-    assignWalk: true,      // task.assigned  → assignee walks to whoever assigned it (captain, or the sender of a handoff), then back to work
-    handInWalk: true,      // task.completed → worker walks to the captain to hand in
+    assignWalk: true,      // task.assigned  → the giver walks to the receiver's desk (captain hands out, a sender hands over, QA brings it back); the receiver stays and starts
+    handInWalk: true,      // task.completed → worker walks into the captain's room to hand in
     planningMeeting: true, // job.created    → captain plans in the meeting room until job.planned / job.failed
     failAlert: true,       // task.failed / cancelled / job.failed → red ring + bubble on the person affected
     cheerOnJobDone: true,  // job.completed  → whole team celebrates for a moment

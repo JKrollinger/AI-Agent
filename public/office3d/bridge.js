@@ -99,6 +99,10 @@
   // the scene clock follows the dashboard's simulation speed (sim only): walks and talks get shorter when tasks finish faster
   const sceneSpeed = () => (store.mode === "sim" ? Math.max(1, Math.min(4, Math.round(store.speed))) : 1);
   const talkSecs = () => (store.mode === "sim" ? Math.max(0.8, Math.min(3, 3 / Math.max(0.25, store.speed))) : 3);
+  const pinSecs = () => (store.mode === "sim" ? Math.max(0.5, Math.min(1.2, 1.2 / Math.max(0.25, store.speed))) : 1.2); // pinning a paper is quick
+  const paperOf = (t, from) => ({ id: t.id, title: t.title, attempts: t.attempts || 1, from: from && from !== "captain" ? name(from) : "captain" });
+  const pins = new Map(); // taskId -> agentId whose board holds the paper
+  function dropPaper(t) { const owner = pins.get(t.id); if (owner) { O.unpin(owner, t.id); pins.delete(t.id); } }
   function applySpeed() { O.setSpeed(sceneSpeed()); }
   function connLabel() { return store.mode === "live" ? "เชื่อมต่อแล้ว · Claude จริง" : "เชื่อมต่อแล้ว · โหมดจำลอง"; }
   const name = (id) => store.agents.get(id)?.name || (id === "captain" ? "กัปตัน" : id);
@@ -115,7 +119,8 @@
         (d.agents || []).forEach((a) => {
           store.agents.set(a.id, a);
           O.setAgent(a.id, agentPatch(a));
-          if (a.status === "working" && a.currentTaskId) { const e = entryOf(a.id, a.currentTaskId, true); e.text = a.lastOutput || ""; }
+          if (a.status === "working" && a.currentTaskId) { const e = entryOf(a.id, a.currentTaskId, true); e.text = a.lastOutput || "";
+            const t = store.tasks.get(a.currentTaskId); if (t && a.role !== "captain") { O.pin(a.id, paperOf(t, null)); pins.set(t.id, a.id); } } // board shows the running task
           else if (a.lastOutput && !entries(a.id).length) entries(a.id).push({ taskId: null, title: "ผลงานล่าสุด", attempts: 0, phase: "", progress: 1, status: "done", text: "", tools: [], review: null, output: a.lastOutput, error: "", startedAt: null, finishedAt: null, from: null });
           touch(a.id);
         });
@@ -134,20 +139,26 @@
         break;
       case "task.created": case "task.patch":
         store.tasks.set(d.task.id, d.task); break;
-      case "task.updated": { // cancelled by the operator → the person who had it stops (agent.updated makes them idle)
+      case "task.updated": { // cancelled by the operator → the person who had it stops (agent.updated makes them idle); requeued → paper leaves the board
         const prev = store.tasks.get(d.task.id); store.tasks.set(d.task.id, d.task);
+        if (!["assigned", "running"].includes(d.task.status) || d.task.assignedTo !== pins.get(d.task.id)) dropPaper(d.task);
         if (d.task.status === "cancelled" && prev?.status !== "cancelled") {
           const who = lastAgentOf(d.task);
           if (who) { closeEntry(who, d.task.id, "cancelled"); O.say(who, "ยกเลิกงาน: " + trunc(d.task.title, 22), 4); if (RX.failAlert !== false) O.alert(who, 3); act(`${who}: bubble ยกเลิกงาน + alert`); }
         }
         break;
       }
-      case "task.assigned": { // walk to whoever handed the work over (captain, or the sender of a handoff), then back to the desk
+      case "task.assigned": { // the giver walks to the receiver's desk: captain hands out work, a sender hands it over, QA brings it back — the receiver stays and starts
         store.tasks.set(d.task.id, d.task);
-        const from = d.from || "captain";
+        const from = d.from || "captain", title = trunc(d.task.title, 22);
         O.setAgent(d.to, { status: "working", task: d.task.title, progress: d.task.progress || 0, attempts: d.task.attempts, toolCalls: d.task.toolCalls || 0 });
-        if (RX.assignWalk !== false && from !== d.to) { O.visit(d.to, from, talkSecs()); act(`${d.to} walks to ${from} (${talkSecs().toFixed(1)}s talk)`); }
-        O.say(d.to, (from === "captain" ? "รับงาน: " : `รับต่อจาก ${name(from)}: `) + trunc(d.task.title, 22), 3);
+        O.say(d.to, (from === "captain" ? "รับงาน: " : `รับต่อจาก ${name(from)}: `) + title, 3);
+        const paper = paperOf(d.task, from); dropPaper(d.task); pins.set(d.task.id, d.to);
+        if (RX.assignWalk !== false && from !== d.to) { // walk over, pin the paper on their board, walk straight back (no queueing)
+          const isQa = store.agents.get(from)?.role === "reviewer";
+          const words = from === "captain" ? "มอบหมาย: " + title : isQa ? `ส่งกลับแก้: ${title}` : `ส่งต่อ: ${title}`;
+          O.visit(from, d.to, pinSecs(), words, paper); act(`${from} walks to ${d.to}'s desk, pins "${title}"`);
+        } else O.pin(d.to, paper);
         break;
       }
       case "task.started": { // attempt N begins → sit down and work; a repeat attempt says so
@@ -178,11 +189,12 @@
         touch(d.agentId);
         return; // too frequent for the trace
       }
-      case "task.completed": { // hand the work in to the captain (walk), then the agent.updated that follows makes them idle at the desk
+      case "task.completed": { // the worker walks into the captain's room to hand the work in (says "ส่งผลงาน ✓" there); agent.updated then makes them idle
         store.tasks.set(d.task.id, d.task);
         closeEntry(d.from, d.task.id, "done", { output: d.task.output || "", progress: 1, phase: d.task.phase });
-        if (RX.handInWalk !== false && d.from && d.from !== (d.to || "captain")) { O.visit(d.from, d.to || "captain", talkSecs()); act(`${d.from} walks to ${d.to || "captain"} to hand in`); }
-        O.say(d.from, "ส่งผลงาน ✓", 3);
+        dropPaper(d.task); // the worker takes the paper off the board and brings it along
+        if (RX.handInWalk !== false && d.from && d.from !== (d.to || "captain")) { O.visit(d.from, d.to || "captain", talkSecs(), "ส่งผลงาน ✓"); act(`${d.from} walks to ${d.to || "captain"}'s desk to hand in`); }
+        else O.say(d.from, "ส่งผลงาน ✓", 3);
         break;
       }
       case "task.review": { // QA verdict on the producer's work (approved, or accepted with notes after the last round) — a reject comes as task.handoff {manual:false}
@@ -197,6 +209,7 @@
       }
       case "task.handoff": { // manual: the sender stops (agent.updated → idle) · QA reject (manual:false, from = reviewer): the producer sees the score; the walk comes with task.assigned
         store.tasks.set(d.task.id, d.task);
+        dropPaper(d.task); // the paper travels with the hand-over (pinned on the receiver's board at task.assigned)
         if (d.manual) {
           if (d.from && d.from !== "captain") { closeEntry(d.from, d.task.id, "handoff", { phase: d.task.phase }); O.say(d.from, `ส่งต่อให้ ${name(d.to)}`, 3); act(`${d.from}: bubble ส่งต่อให้ ${d.to}`); }
         } else if (d.to) { // QA sent it back: the real review (score + feedback) is on the task
@@ -207,7 +220,7 @@
       }
       case "task.failed": { // the person stops (agent.updated → idle); red ring + the real reason
         store.tasks.set(d.task.id, d.task);
-        const who = lastAgentOf(d.task);
+        const who = lastAgentOf(d.task); dropPaper(d.task);
         if (who) {
           closeEntry(who, d.task.id, "failed", { error: d.error || "" });
           O.say(who, d.retry ? "ล้มเหลว จะลองใหม่" : "งานล้มเหลว", 4);
