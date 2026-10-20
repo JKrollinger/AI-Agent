@@ -1,0 +1,15 @@
+# วางใต้บล็อก mcp_servers: ที่มีอยู่แล้วใน config.yaml ของ Hermes (เพิ่มเป็นรายการใหม่ ไม่แทนที่รายการเดิม)
+# เครื่องมือจะชื่อ mcp_grock_list_projects, mcp_grock_list_agents, mcp_grock_create_job, mcp_grock_job_status, mcp_grock_job_result, mcp_grock_wait_job
+# แก้ config แล้วพิมพ์ /reload-mcp ในแชต (หรือรีสตาร์ต gateway)
+mcp_servers:
+  grock:
+    command: "node"
+    args: ["C:/Projects/AI Agent/Grock Agent/tools/mcp-server.mjs"]   # WSL2/Linux: "/mnt/c/Projects/AI Agent/Grock Agent/tools/mcp-server.mjs"
+    env:
+      GROCK_URL: "http://127.0.0.1:3789"                                # ศูนย์ควบคุม (Hermes ไม่ส่ง env ของ shell ให้ จึงต้องใส่ที่นี่)
+      GROCK_TOKEN: "ใส่โทเคน hermes จาก API_TOKENS ของศูนย์ควบคุม"      # สิทธิ์ jobs ก็พอ
+    timeout: 900          # วินาทีต่อการเรียกเครื่องมือ (wait_job รอได้นาน)
+    connect_timeout: 30
+    enabled: true
+    # tools:
+    #   include: [create_job, wait_job, job_result, job_status, list_projects, list_agents]

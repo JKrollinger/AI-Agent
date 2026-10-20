@@ -179,4 +179,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
 - [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo
 - [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md) — เปิดใช้งานจากอินเทอร์เน็ตด้วย Cloudflare Tunnel: รหัสผ่าน, `ALLOWED_HOSTS`, quick/named tunnel, Windows service, Cloudflare Access
-- [docs/11-hermes.md](docs/11-hermes.md) — สั่งงานทาง Telegram ผ่าน Hermes Agent: โทเคนสิทธิ์จำกัด + งบรายวัน, แผนจากภายนอก, webhook แจ้งผล + ลายเซ็น, MCP server, ตั้งค่า Hermes (Telegram gateway, MCP, webhook route, cron), บอท Telegram ต่อตรง
+- [docs/11-hermes.md](docs/11-hermes.md) — สั่งงานทาง Telegram ผ่าน Hermes Agent: โทเคนสิทธิ์จำกัด + งบรายวัน, แผนจากภายนอก, webhook แจ้งผล + ลายเซ็น, MCP server, ฝั่ง Hermes สองทาง (เสริมตัวเดิมด้วย MCP + ทักษะ `tools/hermes/skills/grock-workforce` / โปรไฟล์แยก), webhook route, cron, บอท Telegram ต่อตรง

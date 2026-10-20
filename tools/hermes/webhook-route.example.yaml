@@ -1,0 +1,22 @@
+# route รับผลโจทย์จากศูนย์ควบคุม → ส่งเข้า Telegram (ตั้งใน config.yaml ของโปรไฟล์ default ซึ่งเป็นเจ้าของ listener เดียวของ gateway)
+# ต้องมีใน .env ของโปรไฟล์ default: WEBHOOK_ENABLED=true และ WEBHOOK_PORT=8644 (ถ้ายังไม่เคยเปิด webhook ingress)
+# ศูนย์ควบคุมตั้ง JOB_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/grock  (โปรไฟล์แยก: http://127.0.0.1:8644/p/<โปรไฟล์>/webhooks/grock)
+# และ WEBHOOK_SECRET = ค่าเดียวกับ secret ด้านล่าง — Hermes ตรวจหัว X-Webhook-Signature-V2 + X-Webhook-Timestamp (HMAC ของ "<ts>.<body>") ให้เอง
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      port: 8644
+      routes:
+        grock:
+          secret: "ค่าเดียวกับ WEBHOOK_SECRET ของศูนย์ควบคุม"
+          # profile: grock                  # ใส่เมื่อให้โปรไฟล์แยกชื่อ grock เป็นผู้รับ (route จะอยู่ที่ /p/grock/webhooks/grock)
+          deliver: "telegram"
+          deliver_extra:
+            chat_id: "ใส่ chat id ที่ต้องการรับผล"   # ไม่ใส่ = TELEGRAM_HOME_CHANNEL ของโปรไฟล์ที่รับ
+          deliver_only: true                # ส่งข้อความที่เรนเดอร์จาก prompt ตรง ๆ ไม่เรียกโมเดล (ไม่เสียโทเคน)
+          prompt: |
+            {event} — {goal}
+            {summary}
+            💵 ${costUsd} · ⏱ {durationSec} วินาที · ผู้ขอ {requestedBy}
+            📁 {resultPath}
