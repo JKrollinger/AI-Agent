@@ -709,7 +709,7 @@ function stripCard(t) {
   if (t.status === "done") reached = 5;
   const bad = t.status === "failed" || t.status === "cancelled";
   return `<div class="scard task" data-task="${t.id}" style="border-top-color:${ri.color}">
-    <div class="s-head">${who ? avatarHtml(who, 22) : `<span class="avatar-emoji">${ri.emoji}</span>`}<b>${esc(who?.name || (t.preferredAgentId ? `รอ ${agentName(t.preferredAgentId)}` : "รอมอบหมาย"))}</b><span class="s-meta">กัปตันมอบหมาย · ${fmtTime(t.assignedAt || t.createdAt)}</span></div>
+    <div class="s-head">${who ? avatarHtml(who, 22) : `<span class="avatar-emoji">${ri.emoji}</span>`}<b>${esc(who?.name || (t.preferredAgentId ? `รอ ${agentName(t.preferredAgentId)}` : "รอมอบหมาย"))}</b><span class="s-meta" title="กัปตันมอบหมาย ${fmtTime(t.assignedAt || t.createdAt)}">${fmtTime(t.assignedAt || t.createdAt).slice(0, 5)}</span></div>
     <div class="s-title" title="${esc(t.title)}">${esc(t.title)}</div>
     <div class="s-steps">${STEPS.map((s, i) => `<div class="s-step${i < reached ? " on" : ""}${i === reached - 1 && !bad && t.status !== "done" ? " now" : ""}${bad && i === reached - 1 ? " bad" : ""}"><i></i><span>${s}</span></div>`).join("")}</div>
     <div class="s-foot"><span class="chip ${t.status}">${STATUS_TH[t.status] || t.status}</span><span class="tool-chip${t.activeTool ? "" : " hidden"}" data-toolchip>${toolChip(t.activeTool)}</span><span class="s-pct">${pct(t.progress)}</span></div>

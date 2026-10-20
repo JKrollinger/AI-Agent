@@ -102,7 +102,7 @@ button, input { font-family: inherit; font-size: inherit; }
 .r-avatar { width: 44px; display: grid; place-items: end center; flex: none; }
 .r-body { flex: 1; min-width: 0; }
 .r-line1 { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.r-line1 b { white-space: nowrap; }
+.r-line1 b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; } /* ชื่อตำแหน่งไทยยาว → ตัดด้วย … ไม่ล้นกรอบ */
 .r-nick { color: var(--muted); font-size: 11px; }
 .r-line1 .chip { margin-left: auto; }
 .chip.idle { color: var(--muted); }
@@ -122,8 +122,9 @@ button, input { font-family: inherit; font-size: inherit; }
 .scard.new { border-style: dashed; align-items: center; justify-content: center; color: var(--muted); width: 120px; }
 .scard.new .plus { font-size: 28px; line-height: 1; color: var(--accent); }
 .s-head { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
-.s-head b { white-space: nowrap; }
-.s-meta { color: var(--muted); font-size: 10.5px; margin-left: auto; white-space: nowrap; }
+.s-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+.s-head .avatar-emoji, .s-head .avatar-img { flex: none; }
+.s-meta { color: var(--muted); font-size: 10.5px; margin-left: auto; white-space: nowrap; flex: none; }
 .s-title { font-size: 12.5px; font-weight: 600; line-height: 1.3; height: 2.6em; overflow: hidden; }
 .s-steps { display: flex; justify-content: space-between; position: relative; padding: 2px 4px 0; }
 .s-steps::before { content: ""; position: absolute; left: 10px; right: 10px; top: 7px; height: 2px; background: var(--line); }
