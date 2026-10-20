@@ -281,7 +281,7 @@ export function normalizePlan(rawTasks, roster = rosterFor(), rules = {}) {
 async function simPlan(job, onPhase, signal, roster = rosterFor()) {
   const goal = job.goal;
   const wantsCode = /โค้ด|code|แอป|app|เว็บ|web|ระบบ|api|สคริปต์|script|โปรแกรม|bot|บอท|dashboard|แดชบอร์ด|automation|อัตโนมัติ/i.test(goal);
-  for (const phase of ["กำลังอ่านโจทย์ (Concentration)", "กำลังแตกงานย่อย (Aura Blade)", "กำลังจัดลำดับและมอบหมาย (Spear Boomerang)"]) {
+  for (const phase of ["กำลังอ่านโจทย์", "กำลังแตกงานย่อย", "กำลังจัดลำดับและมอบหมาย"]) {
     onPhase?.(phase);
     await sleep(rand(600, 1100) / speed(), signal);
   }
@@ -380,18 +380,18 @@ export async function planJob(job, { project = null, onPhase, signal } = {}) {
 // ====================================================================
 // เฟสงานในโหมดจำลอง ใส่ชื่อสกิลประจำอาชีพ Ragnarok (docs/05-ragnarok-theme.md ข้อ 4) เพื่อให้ dashboard มีกลิ่นเกม
 const SIM_PHASES = {
-  researcher: ["กำลังค้นหาแหล่งข้อมูล (Falcon Eyes)", "กำลังอ่านและคัดกรอง (Double Strafe)", "กำลังตรวจสอบข้อเท็จจริง (True Sight)", "กำลังเขียนสรุป (Sharp Shooting)"],
-  analyst: ["กำลังรวบรวมข้อมูลจากทีม (Storm Gust)", "กำลังเปรียบเทียบตัวเลือก (Meteor Storm)", "กำลังประเมินความเสี่ยง (Jupitel Thunder)", "กำลังสรุป insight (Mystical Amplification)"],
-  writer: ["กำลังวางโครงเรื่อง (Memorize)", "กำลังร่างเนื้อหา (Double Casting)", "กำลังปรับภาษา (Dispel)", "กำลังจัดรูปแบบเอกสาร (Land Protector)"],
-  coder: ["กำลังออกแบบโครงสร้าง (Weapon Perfection)", "กำลังเขียนโค้ด (Mammonite)", "กำลังทดสอบ (Weapon Refine)", "กำลังเขียนคู่มือใช้งาน (Cart Boost)"],
-  reviewer: ["กำลังอ่านผลงาน (Lex Aeterna)", "กำลังตรวจตามเกณฑ์ (Assumptio)", "กำลังให้คะแนน (Magnificat)", "กำลังเขียน feedback (Blessing)"],
-  marketer: ["กำลังสำรวจตลาด (Falcon Eyes)", "กำลังส่องคู่แข่ง (Double Strafe)", "กำลังเล็งกลุ่มเป้าหมาย (True Sight)", "กำลังเขียนแผนการตลาด (Sharp Shooting)"],
-  finance: ["กำลังตั้งสมมติฐาน (Memorize)", "กำลังคำนวณตัวเลข (Double Casting)", "กำลังประเมินความเสี่ยง (Dispel)", "กำลังเรียบเรียงข้อเสนอ (Land Protector)"],
-  engineer: ["กำลังรวบรวมความต้องการ (Storm Gust)", "กำลังออกแบบสถาปัตยกรรม AI (Meteor Storm)", "กำลังร่าง prompt และการประเมิน (Jupitel Thunder)", "กำลังประเมินต้นทุน (Mystical Amplification)"],
+  researcher: ["กำลังค้นหาแหล่งข้อมูล", "กำลังอ่านและคัดกรอง", "กำลังตรวจสอบข้อเท็จจริง", "กำลังเขียนสรุป"],
+  analyst: ["กำลังรวบรวมข้อมูลจากทีม", "กำลังเปรียบเทียบตัวเลือก", "กำลังประเมินความเสี่ยง", "กำลังสรุป insight"],
+  writer: ["กำลังวางโครงเรื่อง", "กำลังร่างเนื้อหา", "กำลังปรับภาษา", "กำลังจัดรูปแบบเอกสาร"],
+  coder: ["กำลังออกแบบโครงสร้าง", "กำลังเขียนโค้ด", "กำลังทดสอบ", "กำลังเขียนคู่มือใช้งาน"],
+  reviewer: ["กำลังอ่านผลงาน", "กำลังตรวจตามเกณฑ์", "กำลังให้คะแนน", "กำลังเขียน feedback"],
+  marketer: ["กำลังสำรวจตลาด", "กำลังส่องคู่แข่ง", "กำลังเล็งกลุ่มเป้าหมาย", "กำลังเขียนแผนการตลาด"],
+  finance: ["กำลังตั้งสมมติฐาน", "กำลังคำนวณตัวเลข", "กำลังประเมินความเสี่ยง", "กำลังเรียบเรียงข้อเสนอ"],
+  engineer: ["กำลังรวบรวมความต้องการ", "กำลังออกแบบสถาปัตยกรรม AI", "กำลังร่าง prompt และการประเมิน", "กำลังประเมินต้นทุน"],
 };
-// สกิลของ Stalker (นักวิจัยคนที่ 2) ต่างจาก Sniper
+// เฟสของนักวิจัยคนที่ 2 (res-1) ต่างจากคนแรกเล็กน้อย
 const SIM_PHASES_BY_JOB = {
-  stalker: ["กำลังแอบสำรวจ (Chase Walk)", "กำลังเก็บข้อมูลเชิงลึก (Intimidate)", "กำลังเทียบแหล่งข้อมูล (Preserve)", "กำลังเขียนสรุป (Full Strip)"],
+  stalker: ["กำลังสำรวจแหล่งข้อมูลเชิงลึก", "กำลังเก็บข้อมูลเชิงลึก", "กำลังเทียบแหล่งข้อมูล", "กำลังเขียนสรุป"],
 };
 
 // การจำลองการใช้เครื่องมือ (โหมด sim) เพื่อให้ dashboard แสดงไอคอนได้โดยไม่ต้องมี API key
@@ -826,7 +826,7 @@ export async function synthesizeJob(job, tasks, { project = null, onPhase, signa
     .filter((t) => t.status === "done")
     .map((t) => `## ${t.title} (${ROLES[t.role]?.label || t.role})\n${t.output.length > capChars ? t.output.slice(0, capChars) + `\n…[ตัดที่ ${capChars} ตัวอักษร ดูฉบับเต็มในไฟล์ผลงาน]` : t.output}`);
   if (!isLive()) {
-    for (const phase of ["กำลังรวบรวมผลงานจากทีม (Parrying)", "กำลังสังเคราะห์ข้อสรุป (Concentration)"]) {
+    for (const phase of ["กำลังรวบรวมผลงานจากทีม", "กำลังสังเคราะห์ข้อสรุป"]) {
       onPhase?.(phase);
       await sleep(rand(700, 1200) / speed(), signal);
     }
