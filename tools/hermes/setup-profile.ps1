@@ -120,6 +120,7 @@ platforms:
     enabled: true
     extra:
       port: {{PORT}}
+      host: "127.0.0.1"               # loopback only (the control center runs on this machine); drop for LAN senders
       secret: "{{SECRET}}"
       routes:
         grock:   # control center POSTs to http://127.0.0.1:{{PORT}}/webhooks/grock (JOB_WEBHOOK_URL) with X-Webhook-Signature-V2
