@@ -372,8 +372,13 @@ if(MG){
   glassWall(wx,cx,MG.z1,0);                          // back wall
   glassWall(wz,MG.x0,cz,Math.PI/2); glassWall(wz,MG.x1,cz,Math.PI/2);
   const mrug=add(new THREE.PlaneGeometry(wx-0.5,wz-0.5), mat(0x7a6a5a,{roughness:1}), cx,0.01,cz, scene,{cast:false}); mrug.rotation.x=-Math.PI/2;
-  // name sign above the door
-  const signTex=tex(canvas(512,96,(g,w,h)=>{ g.fillStyle='#1d2430'; g.fillRect(0,0,w,h); g.fillStyle='#ffd46b'; g.font='600 40px "IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(MG.label,w/2,h/2+2); }));
+  // name sign above the door — redrawn with the captain's real name/role from the server (bridge.js → Office3D.setManagerLabel)
+  const signC=document.createElement('canvas'); signC.width=512; signC.height=96;
+  const signTex=new THREE.CanvasTexture(signC); signTex.encoding=THREE.sRGBEncoding; signTex.anisotropy=maxAniso;
+  MG.drawSign=(text)=>{ const g=signC.getContext('2d'), w=signC.width, h=signC.height; g.fillStyle='#1d2430'; g.fillRect(0,0,w,h); g.fillStyle='#ffd46b';
+    let size=40; g.font=`600 ${size}px "IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif`; while(size>22 && g.measureText(text).width>w-40){ size-=2; g.font=`600 ${size}px "IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif`; }
+    g.textAlign='center'; g.textBaseline='middle'; g.fillText(text,w/2,h/2+2); signTex.needsUpdate=true; };
+  MG.drawSign(MG.label);
   const sign=add(new THREE.PlaneGeometry(1.6,0.3), new THREE.MeshBasicMaterial({map:signTex}), MG.doorX,2.98,MG.z0-0.05, scene,{cast:false}); sign.rotation.y=Math.PI;
   // low credenza + award shelf along the side wall
   add(B(0.45,0.75,1.6),M.white, MG.x0+0.3,0.375,cz+1.2); add(B(0.47,0.03,1.62),M.oak, MG.x0+0.3,0.765,cz+1.2);
@@ -1521,6 +1526,8 @@ const Office3D={
     const r=renderer.domElement.getBoundingClientRect(); return {x:r.left+(v.x*0.5+0.5)*r.width, y:r.top+(-v.y*0.5+0.5)*r.height, visible:v.z<1}; },
   agents(){ return workers.map(w=>({id:w.agentId,name:w.name,role:w.role,state:w.state,live:Object.assign({},w.live),x:+w.pos.x.toFixed(2),z:+w.pos.z.toFixed(2)})); },
   select(id){ const w=byId(id); select(w); if(w) focusOn(w); },
+  /** text on the sign above the manager's room door (bridge.js sets "<captain name> · <role>") */
+  setManagerLabel(text){ if(MG&&MG.drawSign){ MG.drawSign(String(text||'')); return true; } return false; },
   /** camera: zoom in on someone's desk (smooth) / back to the overview (also: double-tap the floor, Home key) */
   focus(id,dist){ return focusOn(byId(id),dist); },
   resetView(){ resetView(); return true; },

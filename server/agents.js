@@ -165,6 +165,8 @@ export const DEFAULT_TEAM = [
     duties: "ตรวจคุณภาพ ความถูกต้อง ความครบถ้วนตามโจทย์ การปฏิบัติตามกฎและนโยบาย ของทุกผลงาน ให้คะแนนและ feedback ที่แก้ได้ทันที" },
 ];
 export const MAX_DUTIES_LENGTH = 600;
+export const MAX_NAME_LENGTH = 40; // ชื่อที่แสดง (ตั้งได้จาก dashboard ⚙ ตั้งค่า AI)
+export const MAX_NICK_LENGTH = 24;
 
 // โมเดลที่อนุญาตให้ตั้งค่าต่อคนจาก dashboard
 export const ALLOWED_MODELS = Object.keys(PRICING);

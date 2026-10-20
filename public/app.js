@@ -92,7 +92,7 @@ const roleInfo = (role) => {
   for (const a of S.agents.values()) if (a.role === role) return { label: a.roleLabel, color: a.color, emoji: a.emoji };
   return ROLE_FALLBACK;
 };
-const agentName = (id) => (id === "captain" ? "กัปตัน" : S.agents.get(id)?.name || "—");
+const agentName = (id) => S.agents.get(id)?.name || (id === "captain" ? "กัปตัน" : "—");
 
 // ---------------------------------------------------------------------------
 // API
@@ -145,9 +145,9 @@ function handle(ev) {
       if (S.logs.length > 400) S.logs.length = 400;
       mark("log");
       break;
-    case "agent.updated":
+    case "agent.updated": // รวมกรณีเปลี่ยนชื่อจาก ⚙ ตั้งค่า AI → การ์ดงาน/การ์ดล่าสุด/roster/drawer/หน้าจอ ใช้ชื่อใหม่ทันที
       S.agents.set(d.agent.id, d.agent);
-      mark("metrics", "drawer", "roster", "screen");
+      mark("metrics", "drawer", "roster", "screen", "tasks", "strip");
       break;
     case "task.created": case "task.started": case "task.updated":
       upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
@@ -732,11 +732,11 @@ function renderSettings() {
   const models = S.allowedModels?.length ? S.allowedModels : MODELS_FALLBACK;
   const agents = [...S.agents.values()].sort((a, b) => (a.role === "captain" ? -1 : b.role === "captain" ? 1 : a.id.localeCompare(b.id)));
   box.innerHTML = `<div class="modal">
-    <div class="m-head"><h2>⚙ ตั้งค่า AI ต่อคน</h2><span class="r-sub">มีผลกับงานถัดไป · บันทึกลง data/team.json · โหมด ${S.mode === "live" ? "LIVE" : "SIM (โมเดล/ความลึกจะใช้เมื่อเปิด LIVE, หน้าที่มีผลทั้งสองโหมด)"}</span><button class="close" data-close-settings title="ปิด">×</button></div>
-    <div class="m-body"><table class="cfg"><thead><tr><th>พนักงาน</th><th>อาชีพ · ตำแหน่ง</th><th>โมเดล</th><th>ความลึก</th><th>เครื่องมือ</th><th>โทเคน · ต้นทุน</th><th></th></tr></thead><tbody>
+    <div class="m-head"><h2>⚙ ตั้งค่า AI ต่อคน</h2><span class="r-sub">ชื่อเปลี่ยนทันทีทุกที่ · โมเดล/ความลึก/เครื่องมือ/หน้าที่มีผลกับงานถัดไป · บันทึกลง data/team.json · โหมด ${S.mode === "live" ? "LIVE" : "SIM (โมเดล/ความลึกจะใช้เมื่อเปิด LIVE, หน้าที่มีผลทั้งสองโหมด)"}</span><button class="close" data-close-settings title="ปิด">×</button></div>
+    <div class="m-body"><table class="cfg"><thead><tr><th>ชื่อ · ชื่อเล่น</th><th>ตำแหน่ง</th><th>โมเดล</th><th>ความลึก</th><th>เครื่องมือ</th><th>โทเคน · ต้นทุน</th><th></th></tr></thead><tbody>
     ${agents.map((a) => `<tr data-cfg="${a.id}">
-      <td><div class="s-head">${avatarHtml(a, 26)}<b>${esc(a.name)}</b></div></td>
-      <td class="r-line2">${esc(a.nick && a.nick !== a.name ? a.nick + " · " : "")}${esc(a.roleLabel)}</td>
+      <td><div class="s-head">${avatarHtml(a, 26)}<span class="cfg-names"><input class="cfg-name" type="text" maxlength="40" value="${esc(a.name)}" placeholder="ชื่อที่แสดง" title="ชื่อที่แสดงบนการ์ดงาน แผงรายชื่อ ป้ายในฉาก 3 มิติ และใน prompt ของ AI"><input class="cfg-nick" type="text" maxlength="24" value="${esc(a.nick && a.nick !== a.name ? a.nick : "")}" placeholder="ชื่อเล่น (ไม่บังคับ)"></span></div></td>
+      <td class="r-line2">${esc(a.roleLabel)}<div class="r-line2">${esc(a.id)}</div></td>
       <td><select class="cfg-model">${models.map((m) => `<option value="${m}"${m === a.model ? " selected" : ""}>${m}</option>`).join("")}</select></td>
       <td><select class="cfg-effort">${EFFORTS.map((e) => `<option value="${e}"${e === (a.effort || "medium") ? " selected" : ""}>${e}</option>`).join("")}</select></td>
       <td><label class="sw"><input type="checkbox" class="cfg-tools"${a.toolsEnabled === false ? "" : " checked"}${(a.tools || []).length ? "" : " disabled"}> ${(a.tools || []).length ? a.tools.map((n) => toolUi(n).icon).join("") : "—"}</label></td>
@@ -801,6 +801,9 @@ document.addEventListener("click", (e) => {
   if (el.classList.contains("cfg-save")) {
     const row = el.closest("[data-cfg]");
     const body = { model: row.querySelector(".cfg-model").value, effort: row.querySelector(".cfg-effort").value };
+    const nameIn = row.querySelector(".cfg-name"), nickIn = row.querySelector(".cfg-nick");
+    if (nameIn) { const n = nameIn.value.trim(); if (!n) return toast("กรุณาระบุชื่อก่อนบันทึก", "warn"); body.name = n; }
+    if (nickIn) body.nick = nickIn.value.trim();
     const dutyBox = $(`#settings [data-cfg-duty="${row.dataset.cfg}"] .cfg-duties`);
     if (dutyBox) {
       const duties = dutyBox.value.trim();

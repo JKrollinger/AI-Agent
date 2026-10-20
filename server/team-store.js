@@ -8,8 +8,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(here, "..", "data");
 export const TEAM_FILE = path.join(DATA_DIR, "team.json");
 
-// ฟิลด์ที่อนุญาตให้ override จากไฟล์ (ชื่อ/ตำแหน่ง/สไปรต์ยังมาจาก DEFAULT_TEAM ในโค้ด)
-const OVERRIDE_KEYS = ["model", "effort", "toolsEnabled", "duties"];
+// ฟิลด์ที่อนุญาตให้ override จากไฟล์ (id/ตำแหน่ง/jobId ยังมาจาก DEFAULT_TEAM ในโค้ด) — name/nick = ชื่อที่ผู้ใช้ตั้งเองจาก dashboard
+const OVERRIDE_KEYS = ["name", "nick", "model", "effort", "toolsEnabled", "duties"];
 
 /** อ่าน overrides ต่อคนจากไฟล์ → { [agentId]: { model?, effort?, toolsEnabled?, duties? } } (ไม่มีไฟล์ = {}) */
 export function loadTeamOverrides() {
@@ -36,7 +36,7 @@ export function applyTeamOverrides(def, overrides) {
 export function saveTeamOverrides(agents) {
   const data = { savedAt: new Date().toISOString(), agents: {} };
   for (const a of agents) {
-    data.agents[a.id] = { model: a.model, effort: a.effort, toolsEnabled: a.toolsEnabled, duties: a.duties };
+    data.agents[a.id] = { name: a.name, nick: a.nick, model: a.model, effort: a.effort, toolsEnabled: a.toolsEnabled, duties: a.duties };
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(TEAM_FILE, JSON.stringify(data, null, 2) + "\n", "utf8");

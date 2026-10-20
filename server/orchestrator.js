@@ -5,7 +5,7 @@ import { bus } from "./bus.js";
 import { state, createJob as newJob, createTask, getAgent, getTask, getJob, workers, captain, agentView, snapshot } from "./state.js";
 import { planJob, runTask, synthesizeJob, isLive } from "./executor.js";
 import { recordUsage, recordDone, recordFailed, recordInterrupted, recordHandoff, recordQuality, recordToolUse, fmtDuration } from "./metrics.js";
-import { ROLES, estimateCost, ALLOWED_MODELS, ALLOWED_EFFORTS, MAX_DUTIES_LENGTH } from "./agents.js";
+import { ROLES, estimateCost, ALLOWED_MODELS, ALLOWED_EFFORTS, MAX_DUTIES_LENGTH, MAX_NAME_LENGTH, MAX_NICK_LENGTH } from "./agents.js";
 import { liveAvailable } from "./llm.js";
 import { saveTeamOverrides } from "./team-store.js";
 import { loadPack, buildProjectContext, effectiveAgent, setJobContext, getJobContext, readProjectFiles, jobOutputDir } from "./projects.js";
@@ -734,10 +734,23 @@ export function updateSettings({ speed, autoAssign } = {}) {
 }
 
 /** ตั้งค่าโมเดล/ความลึกการคิด/เครื่องมือ ต่อพนักงาน (มีผลกับงานถัดไป) */
-export function configureAgent(agentId, { model, effort, toolsEnabled, duties } = {}) {
+export function configureAgent(agentId, { model, effort, toolsEnabled, duties, name, nick } = {}) {
   const a = getAgent(agentId);
   if (!a) throw new HttpError(404, "ไม่พบพนักงาน");
   const changes = [];
+  const clean = (v) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  if (name !== undefined) { // ชื่อที่แสดงทุกที่ (roster, การ์ดงาน, ป้ายในฉาก 3 มิติ, prompt) — การมอบหมายใช้ id/ตำแหน่ง/หน้าที่ จึงเปลี่ยนได้อิสระ
+    const n = clean(name);
+    if (!n) throw new HttpError(400, "ชื่อต้องไม่ว่าง");
+    if (n.length > MAX_NAME_LENGTH) throw new HttpError(400, `ชื่อยาวเกิน ${MAX_NAME_LENGTH} ตัวอักษร`);
+    if (a.name !== n) { changes.push(`ชื่อ "${a.name}" → "${n}"`); if (a.nick === a.name) a.nick = n; a.name = n; }
+  }
+  if (nick !== undefined) { // ชื่อเล่น (ว่าง = ใช้ชื่อหลัก)
+    const k = clean(nick);
+    if (k.length > MAX_NICK_LENGTH) throw new HttpError(400, `ชื่อเล่นยาวเกิน ${MAX_NICK_LENGTH} ตัวอักษร`);
+    const v = k || a.name;
+    if (a.nick !== v) { a.nick = v; changes.push(`ชื่อเล่น → "${v}"`); }
+  }
   if (duties !== undefined) {
     const d = String(duties || "").replace(/\s+/g, " ").trim();
     if (!d) throw new HttpError(400, "หน้าที่ต้องไม่ว่าง");

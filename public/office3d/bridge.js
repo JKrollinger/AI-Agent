@@ -78,6 +78,8 @@
     touch(a.id);
   }
   const captainEntry = () => entries("captain").find((x) => x.status === "running") || entries("captain")[0] || null;
+  let signText = "";
+  function roomSign(a) { const t = `${a.name} · ${a.roleLabel || ""}`.replace(/ · $/, ""); if (t !== signText && O.setManagerLabel) { signText = t; O.setManagerLabel(t); } }
 
   // ---------- agent view → scene ----------
   function agentPatch(a) {
@@ -119,6 +121,7 @@
         (d.agents || []).forEach((a) => {
           store.agents.set(a.id, a);
           O.setAgent(a.id, agentPatch(a));
+          if (a.role === "captain") roomSign(a);
           if (a.status === "working" && a.currentTaskId) { const e = entryOf(a.id, a.currentTaskId, true); e.text = a.lastOutput || "";
             const t = store.tasks.get(a.currentTaskId); if (t && a.role !== "captain") { O.pin(a.id, paperOf(t, null)); pins.set(t.id, a.id); } } // board shows the running task
           else if (a.lastOutput && !entries(a.id).length) entries(a.id).push({ taskId: null, title: "ผลงานล่าสุด", attempts: 0, phase: "", progress: 1, status: "done", text: "", tools: [], review: null, output: a.lastOutput, error: "", startedAt: null, finishedAt: null, from: null });
@@ -133,7 +136,7 @@
       case "agent.updated": // idle → desk (rest) · working → desk (work) · paused → sofa ; also the captain's planning/synthesizing phases
         store.agents.set(d.agent.id, d.agent);
         O.setAgent(d.agent.id, agentPatch(d.agent));
-        if (d.agent.role === "captain") captainLog(d.agent);
+        if (d.agent.role === "captain") { captainLog(d.agent); roomSign(d.agent); }
         act(`setAgent ${d.agent.id} status=${d.agent.status}${d.agent.phase ? " phase=" + d.agent.phase : ""}`);
         touch(d.agent.id);
         break;

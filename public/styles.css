@@ -149,6 +149,10 @@ table.cfg { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.cfg th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 table.cfg td { padding: 8px; border-bottom: 1px dashed var(--line); vertical-align: middle; }
 table.cfg select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.cfg-names { display: grid; gap: 4px; }
+.cfg-names input { width: 150px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: 12.5px; }
+.cfg-names .cfg-nick { font-size: 11.5px; color: var(--muted); }
+.cfg-names input:focus { outline: none; border-color: var(--accent); }
 .sw { display: inline-flex; align-items: center; gap: 6px; }
 /* หน้าที่ต่อคน (แถวใต้แต่ละคนใน ⚙ ตั้งค่า AI) */
 table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); }

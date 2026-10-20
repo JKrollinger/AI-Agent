@@ -42,7 +42,7 @@ window.OFFICE3D_CONFIG = {
 
   // Glass office for the captain (front-centre, door toward the main aisle). People hand work in by walking through the door
   // to a spot in front of the desk. false = no room (captain at an open desk). x0/x1/z0/z1 = walls, doorX = door centre on the z0 wall.
-  managerRoom: { x0: -2.0, x1: 1.6, z0: 4.0, z1: 8.9, doorX: 1.0, doorW: 1.1, label: "ห้องผู้จัดการ · Project Manager" },
+  managerRoom: { x0: -2.0, x1: 1.6, z0: 4.0, z1: 8.9, doorX: 1.0, doorW: 1.1, label: "ห้องผู้จัดการ" }, // label = ป้ายเริ่มต้น (bridge.js เปลี่ยนเป็นชื่อกัปตันจริงจากเซิร์ฟเวอร์)
 
   // Live mode: chance of a short break each time an idle agent re-thinks (every 15–30 s).
   // Breaks happen only when the person has no task AND (idleBreaksOnlyWhenTeamIdle) no job is planning/running/synthesizing —
