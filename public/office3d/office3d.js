@@ -261,8 +261,9 @@ function officeChair(x,z,backDir,fabric=M.fabric){
 // ---------- Desk workstation ----------
 const deskTopGeo = slab(1.6,0.03,0.8,0.03,0.006);
 const seats=[];
+const DESK_DROP=0.045; // desks sit 4.5 cm lower than the original 74.5 cm top so the Mixamo typing pose puts the hands on the keyboard, not under the desk
 function workstation(x,z,face,i){
-  const g=new THREE.Group(); g.position.set(x,0,z); scene.add(g);
+  const g=new THREE.Group(); g.position.set(x,-DESK_DROP,z); scene.add(g);
   add(deskTopGeo, M.oak, 0,0.745,0, g);
   [-0.74,0.74].forEach(lx=>{ add(B(0.05,0.72,0.05),M.black, lx,0.37,0, g); add(B(0.06,0.025,0.72),M.black, lx,0.012,0, g); });
   add(B(1.45,0.04,0.04),M.black, 0,0.68,-0.3*face, g);
@@ -306,6 +307,24 @@ function workstation(x,z,face,i){
   if(i%3===0) add(B(0.07,0.008,0.15),M.black, 0.36,0.765,0.02*fwd, g);
   [[0.24,1.2,0x7ad3e0],[0.18,1.2,0xffe06b],[0.24,1.14,0xff9fb8]].slice(0,1+i%3).forEach(([nx,ny,c])=>{
     const n=add(new THREE.PlaneGeometry(0.05,0.05), mat(c,{roughness:1}), nx,ny,0.0135, mon,{cast:false}); n.rotation.z=(rnd()-0.5)*0.2; });
+  // desk name plate at the +x end (canvas, readable from the usual camera side) — text set from the real agent name/role (bridge.js → Office3D.setDeskLabel)
+  const npc=document.createElement('canvas'); npc.width=256; npc.height=64;
+  const nptex=new THREE.CanvasTexture(npc); nptex.encoding=THREE.sRGBEncoding; nptex.anisotropy=maxAniso;
+  const np=new THREE.Group(); np.position.set(0.6,0.745,0.08*face); np.rotation.y=Math.PI/2; g.add(np);
+  add(B(0.27,0.01,0.09),M.black,0,0.005,0,np);
+  const npBack=add(B(0.26,0.075,0.012),mat(0x23262d,{roughness:0.45,metalness:0.3}),0,0.047,0,np); npBack.rotation.x=-0.28;
+  add(new THREE.PlaneGeometry(0.245,0.062), new THREE.MeshBasicMaterial({map:nptex}),0,0,0.0065,npBack,{cast:false,receive:false});
+  const plate={canvas:npc,ctx:npc.getContext('2d'),tex:nptex,name:'',role:''};
+  // pedestal drawers under the right side of the desk
+  const ped=new THREE.Group(); ped.position.set(0.5,0,0); g.add(ped);
+  add(B(0.42,0.6,0.52),M.white,0,0.33,0,ped); add(B(0.44,0.02,0.54),M.oak,0,0.64,0,ped);
+  for(let k=0;k<3;k++){ add(B(0.4,0.17,0.01),mat(0xe9e6df,{roughness:0.8}),0,0.14+k*0.185,0.265*face,ped,{cast:false}); add(B(0.12,0.012,0.012),M.alu,0,0.2+k*0.185,0.275*face,ped,{cast:false}); }
+  // small things on the desk (deterministic per desk)
+  if(i%2===0){ const nb=add(B(0.21,0.012,0.28),mat([0x2f4f7a,0x7a2f3a,0x3d5a3a][i%3],{roughness:0.85}),-0.5,0.752,0.1*face,g); nb.rotation.y=0.18;
+    const pen=add(new THREE.CylinderGeometry(0.005,0.005,0.14,8),mat(0x1d2430,{roughness:0.4,metalness:0.4}),-0.45,0.765,0.12*face,g,{cast:false}); pen.rotation.set(Math.PI/2,0,0.6); }
+  else { const ph=add(B(0.07,0.008,0.145),M.black,-0.42,0.75,0.3*face,g,{cast:false}); ph.rotation.y=-0.25; add(new THREE.PlaneGeometry(0.06,0.13),new THREE.MeshBasicMaterial({color:0x1a2230}),0,0.0045,0,ph,{cast:false,receive:false}).rotation.x=-Math.PI/2; }
+  if(i%3!==1) add(new THREE.CylinderGeometry(0.03,0.028,0.22,14),new THREE.MeshStandardMaterial({color:lin(0xbfe3f5),transparent:true,opacity:0.5,roughness:0.08}),0.42,0.86,-0.12*face,g); // water bottle
+  if(i%3===1){ const fr=add(B(0.11,0.13,0.012),mat(0x3a2c22,{roughness:0.7}),-0.62,0.81,-0.18*face,g,{cast:false}); fr.rotation.y=face>0?0.5:Math.PI-0.5; add(new THREE.PlaneGeometry(0.085,0.1),mat([0x9fd3f0,0xf2a7b8,0xe9c46a][i%3],{roughness:1}),0,0,0.007,fr,{cast:false,receive:false}); } // photo frame
   // task pinboard on a stand at the end of the desk: the captain pins assignments here (bridge.js → Office3D.pin), the worker takes them to hand in
   const bg=new THREE.Group(); bg.position.set(1.08,0,0.1*face); bg.rotation.y=Math.PI/2; g.add(bg);
   add(B(0.3,0.03,0.3),M.black,0,0.015,0,bg); add(B(0.04,1.0,0.04),M.alu,0,0.52,0,bg);
@@ -316,7 +335,7 @@ function workstation(x,z,face,i){
   const board={canvas:bc,ctx:bc.getContext('2d'),tex:btex,mesh:bplane,notes:[]};
   const sz = z+0.74*face;
   officeChair(x+(rnd()-0.5)*0.08, sz, face);
-  seats.push({x, z:sz, h: face>0?Math.PI:0, monitor:scr, board});
+  seats.push({x, z:sz, h: face>0?Math.PI:0, monitor:scr, board, plate});
 }
 let wi=0;
 // 7 desks for the team: two facing pairs at the back, a pair and a single desk at the front
@@ -325,7 +344,7 @@ let wi=0;
   if(!(cx===-6&&dz>0)) add(slab(1.6,0.42,0.035,0.015,0.006), M.sage, cx,0.98,dz);
   blob(cx,dz,2.2,2.2,false);
 });
-const deferredPlants=[[-2,-5.1,0],[-1.55,8.45,1]]; // second one stands in the back corner of the manager's room
+const deferredPlants=[[-2,-5.1,0],[1.25,8.5,1]]; // second one stands in the back-right corner of the manager's room
 // seats are pushed per desk; facing: person at +face side looks toward desk
 
 // ---------- Meeting room (glass box) ----------
@@ -359,6 +378,15 @@ add(B(1.9,1.1,0.05),M.black,0,1.55,0,tvGroup);
 const tvScreen=add(new THREE.PlaneGeometry(1.84,1.04),M.screenOff,0,1.55,0.026,tvGroup,{cast:false});
 const tvOn=new THREE.MeshBasicMaterial({map:slideTex});
 const meetLight=new THREE.PointLight(lin(0xffd9a8),0.6,7,2); meetLight.position.set(7,2.6,-5.1); scene.add(meetLight);
+// flipchart easel in the corner with a sketched chart, water jug + glasses on the table
+{ const fc=new THREE.Group(); fc.position.set(3.9,0,-8.2); fc.rotation.y=Math.PI/4; scene.add(fc);
+  [-0.28,0.28].forEach(x=>{ const l=add(B(0.03,1.9,0.03),M.alu,x,0.95,-0.12,fc); l.rotation.x=-0.12; }); const bl=add(B(0.03,1.9,0.03),M.alu,0,0.95,0.3,fc); bl.rotation.x=0.3;
+  const chart=tex(canvas(256,320,(g,w,h)=>{ g.fillStyle='#fbfaf5'; g.fillRect(0,0,w,h); g.strokeStyle='#2f6fde'; g.lineWidth=5; g.beginPath(); g.moveTo(30,250); g.lineTo(90,190); g.lineTo(140,210); g.lineTo(220,90); g.stroke();
+    g.strokeStyle='#1d2430'; g.lineWidth=3; g.beginPath(); g.moveTo(30,40); g.lineTo(30,260); g.lineTo(230,260); g.stroke(); g.fillStyle='#d9822b'; g.font='600 24px sans-serif'; g.fillText('Q4',36,34); [60,100,140,180].forEach((x,i)=>{ g.fillStyle=['#2f6fde','#d9822b','#2b9a76','#8b94a3'][i]; g.fillRect(x,270,30,8); }); }));
+  add(B(0.7,0.95,0.025),M.white,0,1.35,-0.17,fc).rotation.x=-0.12; const pad=add(new THREE.PlaneGeometry(0.62,0.82),new THREE.MeshStandardMaterial({map:chart,roughness:0.9}),0,1.33,-0.14,fc,{cast:false}); pad.rotation.x=-0.12;
+  blob(3.9,-8.2,0.9,0.9,true); }
+add(new THREE.CylinderGeometry(0.07,0.06,0.24,16),new THREE.MeshStandardMaterial({color:lin(0xd6eefa),transparent:true,opacity:0.5,roughness:0.05}),5.6,0.9,-5.4,scene,{cast:false});
+[[5.95,-5.6],[6.1,-5.25],[5.8,-4.75]].forEach(([x,z])=>add(new THREE.CylinderGeometry(0.03,0.025,0.09,12),new THREE.MeshStandardMaterial({color:lin(0xe8f4fb),transparent:true,opacity:0.5,roughness:0.05}),x,0.825,z,scene,{cast:false}));
 const MEET_DOOR={x:3.5,z:-1.0};
 
 // ---------- Manager's room (glass office for the captain, front-centre, door toward the main aisle) ----------
@@ -385,6 +413,20 @@ if(MG){
   const desk=(CFG.desks||[])[0]||[-0.4,6.6,1]; const vz = desk[1]-1.1*desk[2]; // in front of the desk (the side opposite the captain)
   [[desk[0],vz,0],[desk[0]-0.85,vz+0.1,0.35],[desk[0]+0.85,vz+0.1,-0.35]].forEach(([x,z,h])=>mgrVisitSpots.push({x,z,h: desk[2]>0 ? h : h+Math.PI}));
   const mgrLight=new THREE.PointLight(lin(0xfff1dc),0.5,6,2); mgrLight.position.set(cx,2.6,cz); scene.add(mgrLight);
+  // bookshelf along the back wall (behind the captain, clear of the walking line at z≈7.9) with binders and a trophy
+  { const bs=new THREE.Group(); bs.position.set(-0.7,0,MG.z1-0.19); bs.rotation.y=Math.PI; scene.add(bs);
+    [-0.9,0.9].forEach(x=>add(B(0.03,1.9,0.34),M.walnut,x,0.95,0,bs));
+    for(let y=0.02;y<1.95;y+=0.46) add(B(1.8,0.03,0.34),M.walnut,0,y,0,bs);
+    add(B(1.8,1.9,0.01),mat(0x4a3a2e,{roughness:0.9}),0,0.95,-0.165,bs);
+    const cols=[0x2f6fde,0x1d2430,0xd9822b,0xe8e4dc,0x3d5a3a,0x7a2f3a];
+    for(let row=0;row<4;row++){ let x=-0.84; while(x<0.78){ const bw=0.03+rnd()*0.035, bh=0.22+rnd()*0.12; if(rnd()<0.82) add(B(bw,bh,0.22),mat(cols[Math.floor(rnd()*cols.length)],{roughness:0.8}),x+bw/2,0.04+row*0.46+bh/2,0.02,bs,{cast:false}); x+=bw+0.004; } }
+    add(new THREE.CylinderGeometry(0.05,0.07,0.04,16),M.black,0.6,1.42,0.02,bs,{cast:false}); add(new THREE.CylinderGeometry(0.02,0.03,0.12,10),mat(0xf0c060,{roughness:0.25,metalness:0.8}),0.6,1.5,0.02,bs,{cast:false});
+    add(new THREE.SphereGeometry(0.06,16,10),mat(0xf0c060,{roughness:0.25,metalness:0.8}),0.6,1.6,0.02,bs,{cast:false}); // trophy
+    blob(-0.7,MG.z1-0.19,2.0,0.6,false); }
+  // framed certificates on the credenza, a desk clock and a pen holder on the captain's desk
+  [[cz+0.9,0x9fd3f0],[cz+1.5,0xf2d6a0]].forEach(([z,c])=>{ const fr=add(B(0.012,0.24,0.32),mat(0x3a2c22,{roughness:0.7}),MG.x0+0.3,0.92,z); add(new THREE.PlaneGeometry(0.26,0.18),mat(c,{roughness:1}),0.007,0,0,fr,{cast:false,receive:false}).rotation.y=Math.PI/2; fr.rotation.z=0.06; });
+  add(new THREE.CylinderGeometry(0.035,0.035,0.09,14),mat(0x5a4632,{roughness:0.7}),desk[0]-0.55,0.79,desk[1]-0.05*desk[2],scene,{cast:false});
+  for(let k=0;k<3;k++) add(new THREE.CylinderGeometry(0.004,0.004,0.13,6),mat([0x1d2430,0xd9822b,0x2f6fde][k],{roughness:0.4}),desk[0]-0.55+(k-1)*0.012,0.86,desk[1]-0.05*desk[2]+(k%2)*0.01,scene,{cast:false});
 }
 const inManagerRoom=(x,z)=> !!MG && x>MG.x0 && x<MG.x1 && z>MG.z0 && z<MG.z1;
 const roomDoorFor=(spot)=> spot && inManagerRoom(spot.x,spot.z) ? MGR_DOOR : undefined; // spots inside the glass office are reached through its door
@@ -404,6 +446,10 @@ add(new THREE.CylinderGeometry(0.03,0.03,0.08,10),M.black,0,0.22,-0.21,cm);
 const cmLed=add(new THREE.SphereGeometry(0.012,8,6),new THREE.MeshBasicMaterial({color:0x5bf08a}),0.15,0.35,-0.195,cm,{cast:false});
 for(let k=0;k<4;k++) add(new THREE.CylinderGeometry(0.035,0.03,0.08,12),M.ceramic, 7.85+k*0.1,0.94,8.32);
 add(new THREE.CylinderGeometry(0.075,0.09,0.2,16),M.steel, 8.4,1.0,8.3); // kettle
+add(slab(0.5,0.3,0.4,0.02,0.008),M.steel, 10.3,1.05,8.2); // microwave
+add(new THREE.PlaneGeometry(0.3,0.2),new THREE.MeshStandardMaterial({color:lin(0x11161e),roughness:0.2,metalness:0.4}),10.22,1.05,7.995,scene,{cast:false}).rotation.y=Math.PI;
+add(B(0.03,0.08,0.012),M.black,10.5,1.05,7.99,scene,{cast:false});
+add(new THREE.CylinderGeometry(0.055,0.055,0.24,16),M.paper,7.0,1.02,8.3,scene,{cast:false}); // paper towel roll
 add(slab(0.8,1.9,0.72,0.04,0.012),M.steel, 11.85,0.95,8.15); // fridge
 add(B(0.02,0.8,0.03),M.black, 11.5,1.15,7.78); add(B(0.02,0.4,0.03),M.black, 11.5,0.4,7.78);
 blob(8.5,8.2,4.8,1.4,false); blob(11.85,8.15,1.2,1.1,false);
@@ -563,6 +609,11 @@ const hHand=new THREE.Group(), mHand=new THREE.Group(); [hHand,mHand].forEach(h=
 add(B(0.014,0.1,0.004),M.black,0,0.045,0,hHand,{cast:false}); add(B(0.009,0.15,0.004),M.black,0,0.07,0.004,mHand,{cast:false});
 add(new THREE.CylinderGeometry(0.075,0.08,0.45,16),mat(0xc8231c,{roughness:0.35}),-12.5,0.25,0.95);
 add(new THREE.CylinderGeometry(0.03,0.03,0.06,10),M.black,-12.5,0.5,0.95);
+// lobby: welcome mat in front of the lifts and a framed poster on the lift wall
+{ const matT=tex(canvas(256,160,(g,w,h)=>{ g.fillStyle='#2b3038'; g.fillRect(0,0,w,h); g.strokeStyle='#6d7682'; g.lineWidth=10; g.strokeRect(12,12,w-24,h-24); noise(g,w,h,20); }));
+  const wm=add(new THREE.PlaneGeometry(1.3,0.85),new THREE.MeshStandardMaterial({map:matT,roughness:1}),12.3,0.012,0.85,scene,{cast:false}); wm.rotation.x=-Math.PI/2;
+  const art=tex(canvas(256,352,(g,w,h)=>{ g.fillStyle='#f4efe6'; g.fillRect(0,0,w,h); [[70,110,70,'#2f6fde'],[160,150,55,'#d9822b'],[110,230,85,'#2b9a76']].forEach(([x,y,r,c])=>{ g.fillStyle=c; g.globalAlpha=0.85; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill(); }); g.globalAlpha=1; g.fillStyle='#1d2430'; g.fillRect(40,300,176,6); }));
+  add(B(0.03,1.0,0.74),mat(0x1d2430,{roughness:0.6}),12.955,1.65,-0.9); const po=add(new THREE.PlaneGeometry(0.66,0.92),new THREE.MeshStandardMaterial({map:art,roughness:0.9}),12.935,1.65,-0.9,scene,{cast:false}); po.rotation.y=-Math.PI/2; }
 // robot vacuum doing laps of the corridor
 const vac=new THREE.Group(); scene.add(vac);
 add(new THREE.CylinderGeometry(0.17,0.17,0.08,32),mat(0x2a2d33,{roughness:0.35}),0,0.045,0,vac);
@@ -614,8 +665,9 @@ const signTex=tex(canvas(1024,224,(g,w,h)=>{
   g.fillStyle='#1d2430'; g.fillRect(0,0,w,h);
   g.fillStyle='#7fc4f0'; g.beginPath(); g.arc(112,112,62,0,Math.PI*2); g.fill();
   g.fillStyle='#1d2430'; g.beginPath(); g.arc(138,96,46,0,Math.PI*2); g.fill();
-  g.fillStyle='#f4f2ee'; g.font='600 74px sans-serif'; g.fillText('FAHSAI DIGITAL',210,118);
-  g.fillStyle='#9aa5b5'; g.font='500 38px sans-serif'; g.fillText('ฟ้าใส ดิจิทัล · ชั้น 21',212,176);
+  const SG=Object.assign({title:'AI Workforce Control Center',subtitle:'ศูนย์ควบคุมพนักงาน AI'},CFG.companySign||{}); // lobby sign text comes from config.js
+  g.fillStyle='#f4f2ee'; let fs=74; g.font=`600 ${fs}px "IBM Plex Sans Thai","Noto Sans Thai",sans-serif`; while(fs>34 && g.measureText(SG.title).width>w-240){ fs-=4; g.font=`600 ${fs}px "IBM Plex Sans Thai","Noto Sans Thai",sans-serif`; } g.fillText(SG.title,210,112);
+  g.fillStyle='#9aa5b5'; g.font='500 36px "IBM Plex Sans Thai","Noto Sans Thai",sans-serif'; g.fillText(SG.subtitle,212,176);
 }));
 { const sg=add(new THREE.PlaneGeometry(2.2,0.48),new THREE.MeshStandardMaterial({map:signTex,emissive:0xffffff,emissiveMap:signTex,emissiveIntensity:0.35,roughness:0.4}),12.955,2.68,0.85,scene,{cast:false});
   sg.rotation.y=-Math.PI/2; }
@@ -955,7 +1007,8 @@ function workVariant(w,t){
   if(/กำลังคิด|กำลังอ่าน|กำลังตรวจ/.test(L.phase||'')) return 'think';
   return ((t + (w.id||0)*7) % 29) < 25 ? 'type' : 'think';   // long typing stretches with a short pause to think (deterministic, not random)
 }
-const CHAIR_HIPS=0.52, SOFA_HIPS=0.56;
+const CHAIR_HIPS=0.55, SOFA_HIPS=0.56; // seated hip height; 0.55 (not 0.52) so typing hands clear the 70 cm desk top
+const ARM_LIFT=Object.assign({x:0,y:0.12,z:-0.18},CFG.typingArmLift||{}); // extra upper-arm rotation (rad) while typing — measured: hands 0.71 → 0.77 m, i.e. on the 0.74 m keyboard instead of under the desk
 const hipsY=(clip,atEnd)=>{ const tr=clip&&clip.tracks.find(t=>/Hips\.position$/.test(t.name)); return tr?tr.values[atEnd?tr.values.length-2:1]:null; };
 function attachProp(model,scale,re,mesh,pos){
   let bone=null; model.traverse(o=>{ if(!bone && o.isBone && re.test(o.name)) bone=o; }); if(!bone) return null;
@@ -1000,6 +1053,11 @@ function poseModel(w,t,dt,sdt){
   if(w.actions.walk) w.actions.walk.timeScale=w.speed/1.25;
   if(w.clip && w.clip!=='walk' && w.actions[w.clip]) w.actions[w.clip].timeScale = w.clip==='work' ? (v==='read'?0.45 : v==='code'?1.6 : 1) : (v==='think'?0.6:1); // reading = slow, code running = fast typing
   w.mixer.update(sdt);
+  // the Mixamo "Typing" clip keeps the hands at lap height; lift both upper arms a little after the mixer so the hands rest on the keyboard
+  if(w.clip==='work' && (ARM_LIFT.x||ARM_LIFT.y||ARM_LIFT.z)){
+    if(!w.armBones){ w.armBones=[]; w.model.traverse(o=>{ if(o.isBone && /(Left|Right)Arm$/.test(o.name)) w.armBones.push([o,o.name.includes('Left')?-1:1]); }); }
+    for(const [o,sd] of w.armBones){ o.rotation.x+=ARM_LIFT.x; o.rotation.y+=ARM_LIFT.y*sd; o.rotation.z+=ARM_LIFT.z*sd; }
+  }
   w.mDrop+=(w.dropTarget-w.mDrop)*(1-Math.exp(-dt*(ONCE.has(w.clip)?1.5:6))); w.model.position.y=w.mDrop;
   if(w.mCup) w.mCup.visible = s==='coffee' || (s==='lounge' && w.clip==='sitdrink');
   if(w.mPhone) w.mPhone.visible = (s==='phone' && w.clip==='phone') || (s==='lounge' && w.clip!=='sitdrink') || (s==='walk' && w.phoneWalk);
@@ -1046,6 +1104,10 @@ function route(w,to,door,prev){
   if(prev && prev.via && from.distanceTo(new THREE.Vector3(prev.x,0,prev.z))<0.05){
     [...prev.via].reverse().forEach(p=>pts.push(p)); fx=pts[pts.length-1].x; fz=pts[pts.length-1].z; }
   const inMeeting = fx>MR.x0 && fz<MR.z1, inMgr = inManagerRoom(fx,fz);
+  if(inMgr && door===MGR_DOOR){ // already inside the manager's room and going to a spot in it: stay inside (walk along the door line, around the desk)
+    const b=behind(to); pts.push({x:MGR_DOOR.x,z:fz},{x:MGR_DOOR.x,z:b.z},b,{x:to.x,z:to.z});
+    return pts.map(p=>new THREE.Vector3(p.x,0,p.z));
+  }
   const exitX = fx<2.5 ? nearestCrossX(fx) : (inMeeting? MEET_DOOR.x : fx);
   if(inMeeting){ const b={x:fx, z:fz-0.6*Math.cos(w.face)}; pts.push(b,{x:MEET_DOOR.x,z:b.z},MEET_DOOR); }
   else if(inMgr){ const b={x:fx, z:fz-0.6*Math.cos(w.face)}; pts.push(b,{x:MGR_DOOR.x,z:b.z},MGR_DOOR); } // step back from the desk/spot, walk to the door line, out
@@ -1458,6 +1520,17 @@ function pinOn(w,note){ const b=w&&w.seat&&w.seat.board; if(!b||!note||note.canc
 function unpinFrom(w,noteId){ const reg=noteReg.get(noteId); if(reg) reg.cancelled=true; noteReg.delete(noteId); // also cancels a paper still on its way
   const b=w&&w.seat&&w.seat.board; if(!b) return false; const n=b.notes.length; b.notes=b.notes.filter(x=>x.id!==noteId); if(b.notes.length!==n) drawBoard(b); return true; }
 seats.forEach(s=>{ if(s.board) drawBoard(s.board); });
+function drawPlate(seat,name,role){
+  const p=seat&&seat.plate; if(!p || (p.name===name && p.role===role)) return;
+  p.name=name; p.role=role; const {ctx,canvas:c}=p, W=c.width, H=c.height;
+  ctx.fillStyle='#141922'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#f5b942'; ctx.fillRect(0,0,6,H);
+  ctx.textBaseline='middle'; ctx.textAlign='left';
+  let size=26; ctx.font=`600 ${size}px ${BOARD_FONT}`; while(size>14 && ctx.measureText(name||'').width>W-24){ size-=2; ctx.font=`600 ${size}px ${BOARD_FONT}`; }
+  ctx.fillStyle='#f3f6fb'; ctx.fillText(name||'',16,role?24:32);
+  if(role){ ctx.font=`500 14px ${BOARD_FONT}`; ctx.fillStyle='#9fb0c8'; ctx.fillText(String(role).slice(0,30),16,48); }
+  p.tex.needsUpdate=true;
+}
+workers.forEach(w=>drawPlate(w.seat,w.name,w.role));
 // live desk monitors: one canvas texture per team member, replacing the static screen art on their own monitor
 const liveScreens={};
 function screenFor(w){
@@ -1518,10 +1591,15 @@ const Office3D={
   alert(id,secs=4){ const w=byId(id); if(!w) return false; w.alertT=secs; return true; },
   /** short celebration for several people (job completed): hop in place, or the 'cheer' clip if the model has one */
   cheer(ids,secs=2.5){ (ids||[]).forEach(id=>{ const w=byId(id); if(w) w.cheerT=secs; }); return true; },
+  /** desk name plate: the real name/role from the server (bridge.js calls this on snapshot / agent.updated) */
+  setDeskLabel(id,name,role){ const w=byId(id); if(!w) return false; drawPlate(w.seat,String(name||w.name),String(role||w.role||'')); return true; },
   /** canvas drawn by the page (bridge.js) and shown on this person's desk monitor; call screenDirty() after drawing */
   screenCanvas(id){ const e=screenFor(byId(id)); return e?e.canvas:null; },
   screenDirty(id){ const w=byId(id), e=w&&liveScreens[w.agentId]; if(e) e.tex.needsUpdate=true; },
   _debug(id){ const w=byId(id); return w&&{state:w.state,pos:w.pos.toArray(),path:w.path.map(v=>[v.x,v.z]),after:w.after,timer:w.timer,ghost:w.ghostT,stuck:w.stuckT,pin:w.pin,queue:w.queue}; },
+  _armLift(x,y,z){ ARM_LIFT.x=+x||0; ARM_LIFT.y=+y||0; ARM_LIFT.z=+z||0; return Object.assign({},ARM_LIFT); },
+  _bones(id){ const w=byId(id); if(!w||!w.model) return null; const v=new THREE.Vector3(), out={state:w.state,clip:w.clip,scale:+w.scale.toFixed(4),drop:+w.mDrop.toFixed(3)};
+    w.model.traverse(o=>{ if(!o.isBone) return; const m=o.name.match(/(Hips|RightHand|LeftHand|Head|RightFoot|LeftUpLeg|RightForeArm)$/); if(m){ o.getWorldPosition(v); out[m[1]]=+v.y.toFixed(3); } }); return out; },
   _monitorXY(id){ const w=byId(id); if(!w||!w.seat||!w.seat.monitor) return null; const v=new THREE.Vector3(); w.seat.monitor.getWorldPosition(v); v.project(camera);
     const r=renderer.domElement.getBoundingClientRect(); return {x:r.left+(v.x*0.5+0.5)*r.width, y:r.top+(-v.y*0.5+0.5)*r.height, visible:v.z<1}; },
   agents(){ return workers.map(w=>({id:w.agentId,name:w.name,role:w.role,state:w.state,live:Object.assign({},w.live),x:+w.pos.x.toFixed(2),z:+w.pos.z.toFixed(2)})); },

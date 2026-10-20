@@ -121,6 +121,7 @@
         (d.agents || []).forEach((a) => {
           store.agents.set(a.id, a);
           O.setAgent(a.id, agentPatch(a));
+          if (O.setDeskLabel) O.setDeskLabel(a.id, a.name, a.roleLabel);
           if (a.role === "captain") roomSign(a);
           if (a.status === "working" && a.currentTaskId) { const e = entryOf(a.id, a.currentTaskId, true); e.text = a.lastOutput || "";
             const t = store.tasks.get(a.currentTaskId); if (t && a.role !== "captain") { O.pin(a.id, paperOf(t, null)); pins.set(t.id, a.id); } } // board shows the running task
@@ -136,6 +137,7 @@
       case "agent.updated": // idle → desk (rest) · working → desk (work) · paused → sofa ; also the captain's planning/synthesizing phases
         store.agents.set(d.agent.id, d.agent);
         O.setAgent(d.agent.id, agentPatch(d.agent));
+        if (O.setDeskLabel) O.setDeskLabel(d.agent.id, d.agent.name, d.agent.roleLabel); // desk name plate follows renames
         if (d.agent.role === "captain") { captainLog(d.agent); roomSign(d.agent); }
         act(`setAgent ${d.agent.id} status=${d.agent.status}${d.agent.phase ? " phase=" + d.agent.phase : ""}`);
         touch(d.agent.id);

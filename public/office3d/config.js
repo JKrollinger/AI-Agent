@@ -66,6 +66,13 @@ window.OFFICE3D_CONFIG = {
   visitor: { enabled: false, name: "แขก", role: "ผู้มาติดต่อจากบริษัทลูกค้า",
     look: { skin: 0xd9a47c, shirt: 0xdfe7f0, jacket: 0x3c4a5e, pants: 0x3c4a5e, hair: 0x2a1f18, style: 2, iris: 0x3b2618, shoe: 0x1b1b1d } },
 
+  // Typing pose fix: the Mixamo "Typing" clip holds the hands at lap height, so the upper arms are lifted a little (radians) while typing.
+  // Desks are 70 cm high (DESK_DROP in office3d.js) and seated hips at 55 cm; with this lift the hands rest on the keyboard. Set all to 0 to disable.
+  typingArmLift: { x: 0, y: 0.12, z: -0.18 },
+
+  // Lobby sign above the lifts (your organisation's name).
+  companySign: { title: "AI Workforce Control Center", subtitle: "ศูนย์ควบคุมพนักงาน AI" },
+
   // When embedded in an <iframe>: only accept postMessage commands from these origins ([] = the page's own origin only, i.e. the dashboard).
   allowedOrigins: [],
 };
