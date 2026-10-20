@@ -10,6 +10,13 @@ import { findClaudeCli, runHeadlessEdit, simulateChanges, writePatch, composeEdi
 import * as llm from "./llm.js";
 
 export const isLive = () => state.mode === "live";
+/**
+ * โหมดของ Developer ที่แก้ไฟล์จริงผ่าน Claude Code headless (apply.js) — CODE_MODE ใน .env:
+ *   auto (ค่าเริ่มต้น) = ตามโหมดระบบ · live = เรียก `claude` จริงแม้ระบบอยู่โหมด SIM (ใช้บัญชี claude.ai ที่ล็อกอินไว้ใน Claude Code ได้ ไม่ต้องมี ANTHROPIC_API_KEY
+ *   ซึ่งโหมด LIVE ของระบบต้องมีเพราะกัปตัน/QA เรียก API ตรง) · sim = ไม่เรียก `claude` เลย (patch จำลอง) แม้ระบบอยู่โหมด LIVE
+ */
+export const codeMode = () => { const m = String(process.env.CODE_MODE || "auto").toLowerCase(); return m === "live" || m === "sim" ? m : "auto"; };
+export const codeLive = () => (codeMode() === "auto" ? isLive() : codeMode() === "live");
 
 const VALID_ROLES = ["marketer", "researcher", "finance", "engineer", "coder", "reviewer"];
 const MAX_PLAN_TASKS = 8;
@@ -809,7 +816,7 @@ export function editGrantFor({ agent, task, context, onProgress }) {
 export async function runTask(args) {
   const grant = editGrantFor(args);
   if (grant) {
-    if (!isLive()) return simRun({ ...args, grant });
+    if (!codeLive()) return simRun({ ...args, grant });
     const cli = findClaudeCli();
     if (cli.bin) return runHeadlessEdit({ ...args, grant, cli, taskBody: taskPrompt(args.task, args.context) });
     args.onProgress?.({ note: `โปรเจกต์ให้สิทธิ์แก้ไฟล์กับ ${args.agent.name} แต่${cli.error} → ทำแบบข้อเสนอ (ไม่แตะไฟล์) แทน`, level: "warn" });

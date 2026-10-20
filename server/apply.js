@@ -211,7 +211,10 @@ export function findClaudeCli({ force = false } = {}) {
 export function claudeArgs({ grant, agent = {} }) {
   const builtin = new Set(["Read", "Glob", "Grep"]);
   for (const t of grant.tools) builtin.add(t.startsWith("Bash(") ? "Bash" : t);
-  const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk", "--no-session-persistence", "--setting-sources", "user", "--tools", [...builtin].join(",")];
+  // --strict-mcp-config: ไม่โหลด MCP ของผู้ใช้ (~/.claude.json, connector ของ claude.ai, plugin) — ทดสอบกับ claude 2.1.157: MCP ระดับผู้ใช้ทำให้ prompt บวม ~380K tokens (≈$2.5 ต่องานเล็ก ๆ)
+  //   และเปิดเครื่องมือนอกสิทธิ์ (Google Drive ฯลฯ) ให้ Developer; ต้องการ MCP เฉพาะงานให้ใส่ GROCK_CLAUDE_ARGS=--mcp-config <ไฟล์> (ยัง strict: โหลดเฉพาะที่ระบุ)
+  // --disable-slash-commands: ไม่โหลด skill/slash command ของผู้ใช้ (Developer ไม่มีเครื่องมือ Skill อยู่แล้ว ประหยัด ~7K tokens ต่อ turn)
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk", "--no-session-persistence", "--setting-sources", "user", "--strict-mcp-config", "--disable-slash-commands", "--tools", [...builtin].join(",")];
   const model = grant.model || agent.model;
   if (model) args.push("--model", model);
   if (["low", "medium", "high", "xhigh"].includes(agent.effort)) args.push("--effort", agent.effort);
@@ -711,17 +714,25 @@ export async function runHeadlessEdit({ agent, task, context, grant, cli = null,
     }
     onProgress?.({ phase: "กำลังเทียบไฟล์และสรุป patch", progress: 0.92, tool: null });
     const changes = collectChanges(pack.root, sandbox, grant);
-    const summary = typeof res.result === "string" && res.result.trim() ? res.result : st.text;
-    if (res.is_error && !changes.files.length) throw new Error(`Claude Code รายงานข้อผิดพลาด (${res.subtype || "error"}): ${shorten(String(summary || res.error || ""), 240)}`);
+    // claude จริง (2.1.157): เมื่อ is_error (เช่น error_max_budget_usd = ชน --max-budget-usd) ไม่มี field result แต่มี errors[] — ไฟล์ที่แก้ไปแล้วก่อนหยุดยังอยู่ใน sandbox จึงยังสรุปเป็น patch ได้ (พร้อมคำเตือน)
+    const cliErrors = (Array.isArray(res.errors) ? res.errors : []).map((e) => String(e?.message || e || "")).filter(Boolean);
+    const errorText = cliErrors.join("; ") || (typeof res.error === "string" ? res.error : "");
+    let summary = typeof res.result === "string" && res.result.trim() ? res.result : st.text;
+    if (res.is_error && !changes.files.length) throw new Error(`Claude Code รายงานข้อผิดพลาด (${res.subtype || "error"}): ${shorten(String(errorText || summary || ""), 240)}`);
+    if (res.is_error) summary = `⚠️ Claude Code หยุดก่อนเสร็จ (${res.subtype || "error"}${errorText ? `: ${shorten(errorText, 200)}` : ""}) — patch นี้อาจไม่ครบ ตรวจ diff ให้ดีก่อน apply${summary ? `\n\n${summary}` : ""}`;
     const denied = Array.isArray(res.permission_denials) ? res.permission_denials : [];
-    const cliInfo = { version: cli.version, subtype: res.subtype || null, isError: Boolean(res.is_error), turns: res.num_turns ?? null, durationMs: res.duration_ms ?? null, costUsd: res.total_cost_usd ?? null, sessionId: res.session_id || null, sandboxFiles: copied.files };
+    const cliInfo = { version: cli.version, subtype: res.subtype || null, isError: Boolean(res.is_error), errors: cliErrors, turns: res.num_turns ?? null, durationMs: res.duration_ms ?? null, costUsd: res.total_cost_usd ?? null, sessionId: res.session_id || null, sandboxFiles: copied.files };
     const patch = changes.files.length ? writePatch({ pack, task, agent, changes, mode: "live", cli: cliInfo, denied }) : null;
+    // usage: claude จริงรายงาน result.usage เป็นยอดรวมทุก turn เมื่อสำเร็จ แต่ตอน is_error เป็นแค่ turn แรก — modelUsage (รายโมเดล) เป็นยอดรวมเสมอ จึงเอาค่าที่มากกว่า
     const u = res.usage || {};
+    const mu = Object.values(res.modelUsage && typeof res.modelUsage === "object" ? res.modelUsage : {});
+    const tok = (uKey, mKey) => Math.max(Number(u[uKey]) || 0, mu.reduce((a, m) => a + (Number(m?.[mKey]) || 0), 0));
+    const cacheRead = tok("cache_read_input_tokens", "cacheReadInputTokens"), cacheWrite = tok("cache_creation_input_tokens", "cacheCreationInputTokens");
     const usage = {
-      input_tokens: u.input_tokens || 0,
-      output_tokens: u.output_tokens || 0,
-      ...(u.cache_read_input_tokens ? { cache_read_input_tokens: u.cache_read_input_tokens } : {}),
-      ...(u.cache_creation_input_tokens ? { cache_creation_input_tokens: u.cache_creation_input_tokens } : {}),
+      input_tokens: tok("input_tokens", "inputTokens"),
+      output_tokens: tok("output_tokens", "outputTokens"),
+      ...(cacheRead ? { cache_read_input_tokens: cacheRead } : {}),
+      ...(cacheWrite ? { cache_creation_input_tokens: cacheWrite } : {}),
       ...(Number.isFinite(Number(res.total_cost_usd)) ? { total_cost_usd: Number(res.total_cost_usd) } : {}),
     };
     const model = Object.keys(res.modelUsage || {})[0] || st.model || grant.model || agent.model;

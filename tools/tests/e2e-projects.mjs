@@ -7,10 +7,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."); // รากของศูนย์ควบคุม
-const PORT = 3793;
+const freePort = (start) => new Promise((resolve) => { const tryPort = (p) => { const s = net.createServer(); s.once("error", () => tryPort(p + 1)); s.listen(p, "127.0.0.1", () => s.close(() => resolve(p))); }; tryPort(start); });
+const PORT = await freePort(3793); // พอร์ตแรกที่ว่าง (เซิร์ฟเวอร์ทดสอบที่ค้างจากรอบก่อนทำให้พอร์ตคงที่ชนกัน)
 const BASE = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "grock-e2e-"));

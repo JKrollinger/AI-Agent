@@ -5,10 +5,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const PORT = 3794;
+const freePort = (start) => new Promise((resolve) => { const tryPort = (p) => { const s = net.createServer(); s.once("error", () => tryPort(p + 1)); s.listen(p, "127.0.0.1", () => s.close(() => resolve(p))); }; tryPort(start); });
+const PORT = await freePort(3794); // พอร์ตแรกที่ว่าง (เซิร์ฟเวอร์ทดสอบที่ค้างจากรอบก่อนทำให้พอร์ตคงที่ชนกัน)
 const BASE = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "grock-e2e-apply-"));
@@ -38,7 +40,7 @@ fs.writeFileSync(path.join(rootB, ".grock", "project.json"), JSON.stringify(cfgB
 
 const child = spawn(process.execPath, ["server/index.js"], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), MODE: "sim", LOG_EVENTS: "0", GROCK_DATA_DIR: DATA },
+  env: { ...process.env, PORT: String(PORT), MODE: "sim", CODE_MODE: "auto", LOG_EVENTS: "0", GROCK_DATA_DIR: DATA }, // CODE_MODE=auto กัน .env/shell ของผู้ใช้ที่ตั้ง live ไว้ไม่ให้เทสต์เรียก claude จริง
   stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";
@@ -128,6 +130,8 @@ try {
   assert.equal(jt.patch.decidedBy, "dashboard");
   assert.equal(jt.patch.note, "ตรวจแล้ว ok");
   assert.ok(jt.patch.files.length >= 1 && jt.patches.length >= 1);
+  assert.equal(jt.patches.at(-1).status, "applied", "ประวัติ patches[] ใน job.json ต้องอัปเดตตามการตัดสินใจ ไม่ค้างเป็น pending");
+  assert.equal(jt.patches.at(-1).decidedBy, "dashboard");
   const side = JSON.parse(fs.readFileSync(`${path.join(rootA, ...cur.patch.rel.split("/"))}.json`, "utf8"));
   assert.equal(side.status, "applied");
   assert.deepEqual(side.decisions.map((d) => d.event), ["created", "applied"]);
@@ -153,6 +157,7 @@ try {
   await sleep(300);
   const jj2 = JSON.parse(fs.readFileSync(path.join(rootA, ".grock", "out", jA2.body.job.id, "job.json"), "utf8"));
   assert.equal(jj2.tasks.find((t) => t.id === t2.id).patch.status, "rejected");
+  assert.equal(jj2.tasks.find((t) => t.id === t2.id).patches.at(-1).status, "rejected", "patches[] ต้องเป็น rejected ด้วย");
   assert.ok(events.some((e) => e.type === "log" && e.data.taskId === t2.id && e.data.message.includes("ปฏิเสธ patch")));
   console.log("✅ A2: reject → ไฟล์ไม่เปลี่ยน + job.json บันทึก rejected + apply หลัง reject → 409");
 

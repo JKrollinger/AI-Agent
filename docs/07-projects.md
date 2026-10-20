@@ -115,6 +115,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
                                ▼
    sandbox = สำเนาโปรเจกต์ใน temp (ตัด .git/node_modules/.grock/.claude/ไฟล์ค่าลับ)
    claude -p ใน sandbox โดยจำกัด --tools/--allowedTools/--permission-mode dontAsk/--max-budget-usd/timeout
+   (+ --strict-mcp-config --disable-slash-commands: ไม่โหลด MCP/skill ของผู้ใช้ — ดู 5.5)
                                ▼
    diff sandbox ↔ โปรเจกต์ → ไฟล์นอกสิทธิ์ถูกตัดทิ้ง (บันทึกเป็น rejected)
    เขียน .grock/out/<jobId>/patches/NN-<งาน>.diff (+ .json audit)   ← ไฟล์จริงยังไม่ถูกแตะ
@@ -156,7 +157,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 
 สิทธิ์เป็น **รายเอเจนต์** (คีย์คือ id เช่น `dev-1`) ไม่ใช่รายตำแหน่ง — ทีมที่มีนักพัฒนาหลายคนให้สิทธิ์ต่างกันได้ ค่าที่ไม่ผ่านการตรวจ (glob มี `..`, เครื่องมือที่ไม่อนุญาต, id แปลก) ถูกข้ามพร้อมคำเตือนใน log ตอนรับโจทย์ และ `.grock/`, `.git/`, `.claude/`, `node_modules/`, ไฟล์ค่าลับ **ห้ามเขียนเสมอ** ไม่ว่า `write` จะกว้างแค่ไหน
 
-สิทธิ์จะถูกใช้เมื่อ: งานเป็นตำแหน่ง coder · โจทย์ผูกกับโปรเจกต์ · `permissions.<id>` ของคนที่ได้รับงานมี `write` · คนนั้นไม่ได้ถูกปิดเครื่องมือใน ⚙ ตั้งค่า AI · (โหมด LIVE) หาคำสั่ง `claude` เจอ (PATH, `%APPDATA%\npm\claude.cmd`, `~/.local/bin/claude` หรือ `CLAUDE_BIN` ใน `.env`) — ไม่ครบข้อใดข้อหนึ่ง → ทำแบบข้อเสนอเหมือน Phase 1 และ log บอกเหตุผล
+สิทธิ์จะถูกใช้เมื่อ: งานเป็นตำแหน่ง coder · โจทย์ผูกกับโปรเจกต์ · `permissions.<id>` ของคนที่ได้รับงานมี `write` · คนนั้นไม่ได้ถูกปิดเครื่องมือใน ⚙ ตั้งค่า AI · (โหมด LIVE หรือ `CODE_MODE=live` — ดู 5.4) หาคำสั่ง `claude` เจอ (PATH, `%APPDATA%\npm\claude.cmd`, `~/.local/bin/claude` หรือ `CLAUDE_BIN` ใน `.env`) — ไม่ครบข้อใดข้อหนึ่ง → ทำแบบข้อเสนอเหมือน Phase 1 และ log บอกเหตุผล
 
 ### 5.2 ด่านอนุมัติ
 
@@ -171,18 +172,22 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 
 ทุกขั้นถูกบันทึก 4 ที่: `task.history` (เห็นในไทม์ไลน์ของการ์ดงาน) · `logs/events.jsonl` (event `task.patch` action `pending|applied|rejected|superseded|error` + log) · `.grock/out/<jobId>/job.json` (ต่องาน: `patch` ล่าสุด + `patches` ทุกรอบ: ไฟล์, ไฟล์ที่ถูกตัด, สถานะ, ผู้ตัดสินใจ, เวลา, หมายเหตุ, ต้นทุน/รอบ/เวอร์ชันของ CLI) · `patches/NN-<งาน>.diff.json` (sidecar ข้าง patch พร้อม `decisions[]`) ผลงาน `tasks/NN-coder-*.md` ของงานนั้นมี diff ให้ QA และคุณอ่านด้วย
 
-### 5.4 โหมด sim
+### 5.4 โหมด sim และ `CODE_MODE`
 
 ไม่เรียก `claude` และไม่เสียเงิน: งาน coder ที่มีสิทธิ์จะได้ patch จำลองที่ **apply ได้จริง** (สร้าง `GROCK-SIM-NN.md` ในโฟลเดอร์แรกของ `write` + ต่อท้ายไฟล์เดิมที่อยู่ในสิทธิ์ 1 บรรทัดคอมเมนต์) เพื่อทดสอบ UI/flow/สิทธิ์/audit ให้ครบก่อนเปิด LIVE ไฟล์เหล่านี้ลบทิ้งได้
+
+**`CODE_MODE` ใน `.env`** (`auto` | `live` | `sim`, ค่าเริ่มต้น `auto` = ตามโหมดระบบ) คุมเฉพาะขั้นนี้แยกจากโหมดระบบ:
+- `CODE_MODE=live` — Developer เรียก `claude` จริงแม้ระบบอยู่โหมด SIM สำหรับคนที่ใช้ Claude Code ด้วยบัญชี claude.ai (Pro/Max ที่ `claude auth status` บอก `loggedIn: true`) และ**ไม่มี** `ANTHROPIC_API_KEY` — โหมด LIVE ของระบบต้องมี key เพราะกัปตัน/QA เรียก API ตรง จึงสลับเป็น LIVE ไม่ได้ ในโหมดนี้กัปตันวางแผนและ QA ยังจำลอง (เร็ว ไม่เสียเงิน) ส่วนงาน coder ที่มีสิทธิ์ได้ patch จาก Claude Code จริง ต้นทุนที่ CLI รายงาน (`total_cost_usd`) ยังขึ้น dashboard/`job.json` แต่เป็น**ค่าประเมิน** — แผน claude.ai ไม่เรียกเก็บเป็นเงิน แต่หักโควตาการใช้งานของแผน (เห็น `rate_limit_event` ใน stream) `/api/health` บอก `codeMode`/`codeLive` และ log ตอนเปิดเซิร์ฟเวอร์เตือนไว้
+- `CODE_MODE=sim` — ไม่เรียก `claude` เลย (patch จำลอง) แม้ระบบอยู่โหมด LIVE ใช้ตอนซ้อม flow กับ API จริงของตำแหน่งอื่นโดยไม่ให้ Developer แตะไฟล์
 
 ### 5.5 ข้อจำกัดและความเสี่ยงที่ต้องรู้
 
 - `Bash(...)` ของ Claude Code **ไม่ถูกจำกัดพาธ** — คำสั่งที่อนุญาตรันในเครื่องคุณจริง (ใน sandbox แต่ออกไปอ่านที่อื่นได้) ให้อนุญาตเฉพาะคำสั่งที่จำเป็นและระบุให้แคบ (เช่น `Bash(npm test)` ไม่ใช่ `Bash(npm *)`) ถ้าไม่จำเป็นอย่าให้ Bash เลย
-- sandbox ไม่คัดลอก `.git` (Claude ไม่เห็นประวัติ/commit ไม่ได้) และไม่คัดลอก `.claude/` ของโปรเจกต์ (hook/permission ของโปรเจกต์ไม่ถูกใช้) ตั้งค่าผู้ใช้ (`~/.claude/settings.json`) ยังถูกโหลด (`--setting-sources user`) ใช้ `GROCK_CLAUDE_ARGS=--bare` ถ้าต้องการตัดทุกอย่างและใช้ `ANTHROPIC_API_KEY` อย่างเดียว
+- sandbox ไม่คัดลอก `.git` (Claude ไม่เห็นประวัติ/commit ไม่ได้) และไม่คัดลอก `.claude/` ของโปรเจกต์ (hook/permission ของโปรเจกต์ไม่ถูกใช้) ตั้งค่าผู้ใช้ (`~/.claude/settings.json`) ยังถูกโหลด (`--setting-sources user`) รวม hook/plugin ที่เปิดไว้ (hook `SessionStart` ของ plugin รันใน sandbox ก่อนเริ่มงาน) แต่ **MCP ของผู้ใช้ (`~/.claude.json`, connector ของ claude.ai, MCP ของ plugin) และ skill/slash command ไม่ถูกโหลด** (`--strict-mcp-config --disable-slash-commands`) — ทดสอบกับ `claude` 2.1.157 แล้ว: MCP ระดับผู้ใช้ (เช่น เซิร์ฟเวอร์ที่มีเครื่องมือหลายร้อยตัว) ทำให้ prompt บวม ~380K tokens ในเทิร์นที่ 2 (งานเล็ก ๆ บน haiku กลายเป็น $2.48 และชน `maxUsd: 1`) และยังเปิดเครื่องมือนอกสิทธิ์ (Google Drive/Figma ฯลฯ) ให้ Developer ด้วย ต้องการ MCP เฉพาะงานให้ใส่ `GROCK_CLAUDE_ARGS=--mcp-config <ไฟล์>` (ยัง strict: โหลดเฉพาะที่ระบุ) ใช้ `GROCK_CLAUDE_ARGS=--bare` ถ้าต้องการตัด hook/plugin ด้วย — แต่ `--bare` ใช้ได้เฉพาะ `ANTHROPIC_API_KEY`/`apiKeyHelper` (ไม่อ่าน OAuth ของ claude.ai)
 - การเปลี่ยนแปลงในโฟลเดอร์ที่ไม่ถูกคัดลอก (`dist/`, `node_modules/` ฯลฯ), ไฟล์ไบนารี, ไฟล์ที่ไม่ใช่ UTF-8, ไฟล์เกิน 2 MB และการ rename จะไม่อยู่ใน patch (ถูกบันทึกเป็น rejected พร้อมเหตุผล) patch รวมเกิน 4 MB = งานล้มเหลว (ให้แบ่งงาน)
 - โปรเจกต์ใหญ่: การคัดลอกเข้า sandbox จำกัด 20,000 ไฟล์ / 400 MB (`GROCK_SANDBOX_MAX_FILES`, `GROCK_SANDBOX_MAX_MB`) ใช้ `sandboxIgnore` ตัดโฟลเดอร์ข้อมูล
 - ต้นทุนของ Claude Code (`total_cost_usd`) ถูกนับเข้าต้นทุนของงาน/คน/โจทย์ และถูกตรวจกับ `budget.maxUsdPerJob` **หลัง** งานจบ ใช้ `maxUsd` เป็นเพดานฝั่ง CLI
-- โหมด LIVE ของขั้นนี้ทดสอบกับ CLI จำลอง (`tools/tests/fake-claude.mjs`) ที่เลียนแบบ `stream-json` ของ Claude Code 2.1.x — ยังไม่ได้รันกับ `claude` จริงในเครื่องพัฒนา ลองงานเล็ก ๆ ที่ `maxUsd: 1` ก่อน
+- **ทดสอบกับ `claude` จริงแล้ว** (2026-10-20, Claude Code 2.1.157 บน Windows, บัญชี claude.ai Max ไม่มี API key → `CODE_MODE=live`): โปรเจกต์ทดลอง 5 ไฟล์ โจทย์ "เพิ่มฟังก์ชัน add(a, b) ใน src/math.js" ด้วย `permissions.dev-1 = {write: ["src/**"], tools: ["Edit","Write"], maxUsd: 1}` → Claude Code (sonnet ค่าเริ่มต้น) 5 เทิร์น 14.6 วินาที ต้นทุนที่ CLI รายงาน $0.16 (job รวม $0.23 เพราะมีค่าประเมินของ QA จำลอง) ได้ patch 1 ไฟล์ (+4) รออนุมัติ · `.env` ไม่ถูกคัดลอกเข้า sandbox · กด Apply บน dashboard → ไฟล์จริงเปลี่ยน, `job.json`/sidecar/`logs/events.jsonl` บันทึก `applied` ครบ งานเดียวกันบน haiku ≈ $0.07–0.11 สิ่งที่พบและแก้แล้ว: (1) ต้องมี `--strict-mcp-config` (ข้อข้างบน) (2) เมื่อ CLI หยุดเพราะงบ/ข้อผิดพลาด (`is_error`, subtype เช่น `error_max_budget_usd`) จะไม่มี field `result` แต่มี `errors[]` และ `usage` เป็นแค่เทิร์นแรก — ระบบใช้ `modelUsage` (ยอดรวม) และไฟล์ที่แก้ไปแล้วยังได้ patch พร้อมหัวข้อ "⚠️ Claude Code หยุดก่อนเสร็จ" ให้ตรวจก่อน apply (3) `fake-claude.mjs` ถูกปรับให้ตรงรูปแบบ event ของรุ่นนี้ (hook_started/hook_response → init → thinking → tool_use → rate_limit_event → user tool_result → result) ลองงานเล็ก ๆ ที่ `maxUsd: 1` ก่อนเสมอ
 
 ## 6. ความปลอดภัย
 
@@ -203,7 +208,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 
 ## 8. ข้อจำกัดที่รู้
 
-- โหมด LIVE ยังไม่ได้ทดสอบกับ API จริง (เครื่องที่พัฒนาไม่มี key) — ใช้ `npm run smoke:live` ก่อน
+- โหมด LIVE ของตำแหน่งอื่น (กัปตัน/QA/นักวิจัย ผ่าน Anthropic SDK) ยังไม่ได้ทดสอบกับ API จริง (เครื่องที่พัฒนาไม่มี key — มีแต่บัญชี claude.ai ของ Claude Code) — ใช้ `npm run smoke:live` ก่อน
 - โปรเจกต์ที่เอกสารใหญ่มาก: เลือกหัวข้อด้วย `path#หัวข้อ` และพึ่งดัชนีเอกสาร อย่าใส่ทั้งโฟลเดอร์ใน `always`
-- งานโค้ดเป็น "ข้อเสนอ" เว้นแต่ให้สิทธิ์ใน `permissions` (ข้อ 5): แบบข้อเสนอ นักพัฒนาทดสอบใน sandbox ของ API ซึ่งไม่มีไฟล์โปรเจกต์ จึงไม่ได้รันเทสต์จริงของโปรเจกต์ · แบบแก้ไฟล์จริง ยังไม่ได้ทดสอบกับ `claude` จริง (ทดสอบกับ CLI จำลอง)
+- งานโค้ดเป็น "ข้อเสนอ" เว้นแต่ให้สิทธิ์ใน `permissions` (ข้อ 5): แบบข้อเสนอ นักพัฒนาทดสอบใน sandbox ของ API ซึ่งไม่มีไฟล์โปรเจกต์ จึงไม่ได้รันเทสต์จริงของโปรเจกต์ · แบบแก้ไฟล์จริง ทดสอบกับ `claude` จริงแล้ว 1 โจทย์เล็ก (ดู 5.5) ถ้าไม่ให้ `Bash(...)` Claude Code จะรันเทสต์ของโปรเจกต์ไม่ได้ (มันจะบอกไว้ในสรุปงาน)
 - สถานะอยู่ในหน่วยความจำ รีสตาร์ตเซิร์ฟเวอร์แล้วโจทย์ที่ค้างหาย (ไฟล์ใน `out/` ที่เขียนแล้วยังอยู่)

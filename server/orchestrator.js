@@ -21,6 +21,11 @@ const shorten = (s, n = 40) => (s && s.length > n ? s.slice(0, n - 1) + "…" : 
 const emitAgent = (agent) => bus.publish("agent.updated", { agent: agentView(agent) });
 const emitTask = (type, task, extra = {}) => bus.publish(type, { task, ...extra });
 const emitJob = (type, job) => bus.publish(type, { job });
+/** แทนที่ task.patch และอัปเดตรายการเดียวกัน (rel เดิม) ใน task.patches — ประวัติทุกรอบที่ลง job.json ต้องได้สถานะ/ผู้ตัดสินใจ/หมายเหตุตามการตัดสินใจ ไม่ใช่ค้างเป็น pending */
+const setPatch = (task, next) => {
+  task.patch = next;
+  task.patches = (task.patches || []).map((p) => (p.rel === next.rel ? next : p));
+};
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -323,7 +328,7 @@ async function start(task, agent) {
   task.activeTool = null;
   agent.activeTool = null;
   if (task.patch?.status === "pending") { // ทำรอบใหม่ (QA ส่งกลับ/สั่งทำใหม่) → patch เดิมที่ยังไม่ตัดสินใจถือว่าตกไป
-    task.patch = { ...task.patch, status: "superseded", decidedAt: now(), decidedBy: "system", note: `ถูกแทนที่โดยรอบที่ ${task.attempts}` };
+    setPatch(task, { ...task.patch, status: "superseded", decidedAt: now(), decidedBy: "system", note: `ถูกแทนที่โดยรอบที่ ${task.attempts}` });
     try { markPatch(task.patch, "superseded", task.patch.note); } catch {}
     task.history.push({ t: now(), type: "patch", note: `patch ${task.patch.rel} ตกไป (ทำรอบใหม่)` });
     emitTask("task.patch", task, { action: "superseded" });
@@ -810,7 +815,7 @@ export function applyPatch(taskId, { note = "" } = {}) {
   task.patch.applying = true;
   try {
     const r = applyPatchToProject({ pack, patch: task.patch, note: n, by: "dashboard" });
-    task.patch = { ...task.patch, status: "applied", decidedAt: now(), decidedBy: "dashboard", note: n, appliedFiles: r.files, gitCheck: r.gitCheck?.note || null, lastError: null };
+    setPatch(task, { ...task.patch, status: "applied", decidedAt: now(), decidedBy: "dashboard", note: n, appliedFiles: r.files, gitCheck: r.gitCheck?.note || null, lastError: null });
     task.phase = "apply patch แล้ว";
     task.history.push({ t: now(), type: "patch", note: `ผู้ควบคุมอนุมัติ → apply ${r.files.length} ไฟล์เข้าโปรเจกต์แล้ว${n ? ` — ${n}` : ""} (${r.gitCheck?.note || "ตรวจแล้ว"})` });
     emitTask("task.updated", task);
@@ -818,7 +823,7 @@ export function applyPatch(taskId, { note = "" } = {}) {
     bus.log(`✅ apply patch ของ "${task.title}" เข้าโปรเจกต์ ${pack.name} แล้ว (${r.files.length} ไฟล์: ${r.files.join(", ")})${n ? ` — ${n}` : ""}`, { taskId: task.id, jobId: task.jobId });
   } catch (err) {
     const msg = (err.message || String(err)).slice(0, 400);
-    task.patch = { ...task.patch, lastError: msg };
+    setPatch(task, { ...task.patch, lastError: msg });
     task.history.push({ t: now(), type: "patch", note: `apply ไม่สำเร็จ: ${msg}` });
     emitTask("task.patch", task, { action: "error", error: msg });
     bus.log(`⚠️ apply patch ของ "${task.title}" ไม่สำเร็จ: ${msg}`, { taskId: task.id, jobId: task.jobId, level: "warn" });
@@ -848,7 +853,7 @@ export function rejectPatch(taskId, { reason = "" } = {}) {
   const { task } = pendingPatchTask(taskId);
   const r = String(reason || "").replace(/\s+/g, " ").trim().slice(0, 300);
   try { rejectPatchOfProject({ patch: task.patch, reason: r, by: "dashboard" }); } catch (err) { throw new HttpError(409, err.message); }
-  task.patch = { ...task.patch, status: "rejected", decidedAt: now(), decidedBy: "dashboard", note: r };
+  setPatch(task, { ...task.patch, status: "rejected", decidedAt: now(), decidedBy: "dashboard", note: r });
   task.phase = "ปฏิเสธ patch";
   task.history.push({ t: now(), type: "patch", note: `ผู้ควบคุมปฏิเสธ patch${r ? ` — ${r}` : ""}` });
   emitTask("task.updated", task);

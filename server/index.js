@@ -11,6 +11,7 @@ import * as orch from "./orchestrator.js";
 import { liveAvailable, countTokens } from "./llm.js";
 import { listProjects, registerProject, loadPack, buildProjectContext, reloadPacks, attachWriter, displayNameFor } from "./projects.js";
 import { WORKER_MODEL } from "./agents.js";
+import { codeMode, codeLive } from "./executor.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, "..", "public");
@@ -155,7 +156,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { events: bus.recent(limit).filter((e) => e.type === "log") });
   }
   if (m === "GET" && pathname === "/api/health") {
-    return sendJson(res, 200, { ok: true, mode: state.mode, liveAvailable: liveAvailable(), clients: sseClients.size, uptimeMs: Date.now() - state.startedAt });
+    return sendJson(res, 200, { ok: true, mode: state.mode, liveAvailable: liveAvailable(), codeMode: codeMode(), codeLive: codeLive(), clients: sseClients.size, uptimeMs: Date.now() - state.startedAt });
   }
 
   const remote = isRemote(req);
@@ -299,8 +300,12 @@ server.listen(PORT, HOST, () => {
   console.log(`\n🧭 AI Workforce Control Center`);
   console.log(`   เปิดหน้าควบคุม: http://${HOST}:${PORT}`);
   console.log(`   โหมด: ${modeLabel}`);
+  if (codeMode() === "live" && state.mode !== "live") console.log(`   🧑‍💻 CODE_MODE=live: Developer ที่มีสิทธิ์แก้ไฟล์จะเรียก Claude Code จริง (บัญชีที่ล็อกอินไว้ใน claude) แม้ระบบอยู่โหมด SIM`);
+  else if (codeMode() === "sim" && state.mode === "live") console.log(`   🧑‍💻 CODE_MODE=sim: Developer ไม่เรียก Claude Code (ได้ patch จำลอง) แม้ระบบอยู่โหมด LIVE`);
   if (AUTH_PASSWORD) console.log(`   🔒 ต้องใส่รหัสผ่าน (ผู้ใช้ "${AUTH_USER}")${ALLOWED_HOSTS.length ? ` · เปิดรับโดเมน: ${ALLOWED_HOSTS.join(", ")}` : ""}`);
   else if (ALLOWED_HOSTS.length) console.log(`   ⚠️ เปิดรับโดเมน ${ALLOWED_HOSTS.join(", ")} โดยไม่มีรหัสผ่าน — ตั้ง AUTH_PASSWORD ใน .env ก่อนเปิดสาธารณะ`);
   console.log("");
   bus.log(`🚀 ระบบเริ่มทำงานในโหมด ${state.mode.toUpperCase()}`);
+  if (codeMode() === "live" && state.mode !== "live") bus.log("🧑‍💻 CODE_MODE=live — งานแก้ไฟล์ของ Developer เรียก Claude Code จริง (กัปตัน/QA ยังจำลอง) ต้นทุนที่ CLI รายงานนับเข้าโจทย์", { level: "warn" });
+  else if (codeMode() === "sim" && state.mode === "live") bus.log("🧑‍💻 CODE_MODE=sim — Developer ไม่เรียก Claude Code (patch จำลอง)", { level: "warn" });
 });

@@ -168,6 +168,7 @@ ${diff}`);
   assert.ok(s.includes("--output-format stream-json") && s.includes("--verbose") && s.includes("--permission-mode dontAsk") && s.includes("--no-session-persistence"));
   assert.ok(s.includes("--tools Read,Glob,Grep,Edit,Write,Bash") && s.includes("--model claude-sonnet-5-5") && s.includes("--effort high") && s.includes("--max-budget-usd 3"));
   assert.ok(!s.includes("--max-turns"), "CLI รุ่นปัจจุบันไม่มี --max-turns");
+  assert.ok(s.includes("--strict-mcp-config") && s.includes("--disable-slash-commands"), "ต้องไม่โหลด MCP/skill ของผู้ใช้ (ต้นทุน ~380K tokens + เครื่องมือนอกสิทธิ์)");
   const i = args.indexOf("--allowedTools");
   assert.deepEqual(args.slice(i + 1), ["Edit", "Write", "Bash(npm test)", "Read", "Glob", "Grep"], "--allowedTools ต้องอยู่ท้ายสุด (variadic)");
   const a2 = A.claudeArgs({ grant: { ...grant, maxUsd: 0, model: "claude-haiku-5-5" }, agent: { model: "claude-sonnet-5-5" } });
@@ -302,6 +303,23 @@ ${diff}`);
   const r0 = await A.runHeadlessEdit({ agent, task: { ...task, id: "task-live-0" }, context, grant, taskBody: "x", onProgress: () => {} });
   assert.equal(r0.patch, null);
   assert.ok(r0.output.includes("ไม่มีการแก้ไฟล์"));
+  // claude จริงหยุดกลางคัน (เช่น ชน --max-budget-usd): is_error + errors[] ไม่มี result — ไฟล์ที่แก้แล้วยังได้ patch พร้อมคำเตือน และ usage ต้องมาจาก modelUsage (ยอดรวม) ไม่ใช่ usage ของ turn แรก
+  process.env.FAKE_CLAUDE_ERROR = "1";
+  process.env.FAKE_CLAUDE_EDITS = JSON.stringify([{ path: "src/app.js", append: "export const d = 4;\n" }]);
+  const rErr = await A.runHeadlessEdit({ agent, task: { ...task, id: "task-live-err", seq: 3, title: "แก้ app.js รอบงบหมด" }, context, grant, taskBody: "x", onProgress: () => {} });
+  assert.ok(rErr.patch && rErr.patch.files.length === 1, "ไฟล์ที่แก้ก่อน CLI หยุดต้องยังได้ patch");
+  assert.equal(rErr.patch.cli.subtype, "error_max_budget_usd");
+  assert.equal(rErr.patch.cli.isError, true);
+  assert.deepEqual(rErr.patch.cli.errors, ["Reached maximum budget ($1)"]);
+  assert.ok(rErr.output.startsWith("⚠️ Claude Code หยุดก่อนเสร็จ (error_max_budget_usd: Reached maximum budget ($1))"), rErr.output.slice(0, 120));
+  assert.equal(rErr.usage.input_tokens, 1000, "usage ต้องเป็นยอดรวมจาก modelUsage ไม่ใช่ turn แรก (22)");
+  assert.equal(rErr.usage.cache_read_input_tokens, 500);
+  assert.equal(rErr.usage.total_cost_usd, 0.0123);
+  assert.ok(fs.readFileSync(path.join(root, "src", "app.js"), "utf8").endsWith("export const c = 3;\n"), "ไฟล์จริงต้องไม่เปลี่ยน");
+  // หยุดกลางคันโดยยังไม่ได้แก้ไฟล์ → error พร้อมข้อความจาก errors[]
+  process.env.FAKE_CLAUDE_EDITS = "[]";
+  await assert.rejects(A.runHeadlessEdit({ agent, task: { ...task, id: "task-live-err0" }, context, grant, taskBody: "x", onProgress: () => {} }), /error_max_budget_usd.*Reached maximum budget/);
+  delete process.env.FAKE_CLAUDE_ERROR;
   // crash (ไม่มี result) → error
   process.env.FAKE_CLAUDE_NO_RESULT = "1";
   await assert.rejects(A.runHeadlessEdit({ agent, task, context, grant, taskBody: "x", onProgress: () => {} }), /ไม่มีผลลัพธ์/);
