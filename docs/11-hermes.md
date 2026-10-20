@@ -212,6 +212,14 @@ hermes -p grock gateway status      # หรือ start / stop / restart — lo
   ถ้าภายหลังอัปเดต Hermes เป็นรุ่นที่ multiplexing เปิดเป็นค่าเริ่มต้น ให้ `hermes -p grock gateway uninstall` แล้วย้าย route ไปตามข้อแรก (เติม `profile: grock` และเปลี่ยน `JOB_WEBHOOK_URL` เป็น `/p/grock/webhooks/grock` บนพอร์ตของ default)
 - ไม่อยากมี webhook เลย: ไม่ตั้ง `JOB_WEBHOOK_URL` แล้วให้ Hermes ใช้ `wait_job`/`job_status` เหมือนข้อ 3.1 ขั้น 3
 
+**สิ่งที่พบตอนทำจริงบนเครื่องนี้ (20 ต.ค. 2026, ทดสอบผ่านแล้วครบวงจร):**
+- `hermes -p grock gateway install` ถาม 3 ข้อ (เริ่มเลยไหม / ให้รันตอนล็อกอินไหม / เปิด UAC ไหม) ถ้าไม่เปิด UAC จะไม่ได้ Scheduled Task แต่ได้ **login item ใน Startup folder** แทน: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Hermes_Gateway_grock.vbs` (สคริปต์จริงที่ `profiles\grock\gateway-service\Hermes_Gateway_grock.cmd`) แยกจาก `Hermes_Gateway.vbs` ของ default และ gateway ถูกเริ่มให้ทันที — `hermes -p grock gateway status` ต้องเห็น "Gateway process running" และ "Other profiles: default — PID …" ยังรันอยู่
+- listener webhook ของ Hermes ฟัง **ทุก interface** เป็นค่าเริ่มต้น (`Listening on * (all interfaces)`) → สคริปต์ตั้ง `platforms.webhook.extra.host: "127.0.0.1"` ให้ (log ต้องเป็น `Listening on 127.0.0.1:8645 — routes: grock`) ตัดบรรทัดนี้ออกถ้าศูนย์ควบคุมอยู่คนละเครื่อง
+- ตรวจ listener โดยไม่ส่งอะไรเข้า Telegram: `curl http://127.0.0.1:8645/health` → `{"status":"ok","platform":"webhook"}` และ POST ที่ `/webhooks/grock` โดยไม่มีลายเซ็นต้องได้ 401 (log: `Invalid signature for route grock`)
+- ข้อความแรกถึงบอทใช้เวลา ~36 วินาที (Hermes เปิด MCP server + เรียกโมเดล 6 ครั้ง) หลังจากนั้นโจทย์ขึ้นแดชบอร์ด 3789 ทันทีพร้อมชิป 🔗 hermes · 👤 telegram:… และเมื่อเสร็จ log ของ gateway แสดง `[webhook] direct-deliver event=unknown route=grock target=telegram` (`event=unknown` เป็นป้ายของ Hermes ที่ดูจากหัว event ของ GitHub — ไม่กระทบ) ข้อความถึง Telegram ตาม `prompt` ของ route
+- Hermes ใส่ `requestedBy` เป็น `telegram:@<ชื่อที่แสดง>` ตามที่ทักษะบอก ยอดโจทย์ถูกนับเข้า `data/token-usage.json` ของโทเคน `hermes` ตามปกติ
+- ทดสอบ MCP กับเซิร์ฟเวอร์จริงแบบ pipe ได้ (ไม่ต้องพิมพ์ทีละบรรทัด): `printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"0"}}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_agents","arguments":{}}}' | node --env-file=.env tools/mcp-server.mjs`
+
 ### 3.3 Telegram gateway (บอทใหม่ หรือเครื่องที่ยังไม่มี Hermes)
 
 ติดตั้ง (เฉพาะเครื่องที่ยังไม่มี): Windows (native, PowerShell) `iex (irm https://hermes-agent.nousresearch.com/install.ps1)` → `%LOCALAPPDATA%\hermes` · Linux / macOS / WSL2 `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash` → `~/.hermes/` · จากนั้น `hermes setup`
