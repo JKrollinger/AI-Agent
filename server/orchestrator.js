@@ -55,6 +55,13 @@ function maxAttemptsFor(job) {
   return getJobContext(job?.id)?.pack?.config?.qa?.maxAttempts || MAX_ATTEMPTS;
 }
 
+/** ชื่อที่ใช้เรียกคนนี้ใน log/ผลงานของโจทย์นั้น: ชื่อเฉพาะโปรเจกต์ (project.json) ถ้าโจทย์ผูกกับโปรเจกต์ ไม่งั้นชื่อกลาง */
+function dn(agent, jobId) {
+  if (!agent) return "ทีม";
+  const pack = getJobContext(jobId)?.pack;
+  return pack ? effectiveAgent(agent, pack).name : agent.name;
+}
+
 /** ข้อมูลโปรเจกต์สำหรับ executor: { pack, name, system, data, qa, files } หรือ null */
 function projectFor(jobId, role = "captain") {
   const jc = getJobContext(jobId);
@@ -262,7 +269,7 @@ function assign(task, agent) {
   emitAgent(agent);
   if (from === "captain") {
     const byDuty = task.preferredAgentId === agent.id ? " ตามหน้าที่" : task.preferredAgentId ? ` (แทน ${getAgent(task.preferredAgentId)?.name || "คนที่เลือกไว้"} ที่หยุดพัก)` : "";
-    bus.log(`📨 กัปตันมอบหมาย "${task.title}" ให้ ${agent.name} (${agent.roleLabel})${byDuty}`, { agentId: agent.id, taskId: task.id });
+    bus.log(`📨 กัปตันมอบหมาย "${task.title}" ให้ ${dn(agent, task.jobId)} (${agent.roleLabel})${byDuty}`, { agentId: agent.id, taskId: task.id });
   }
   void start(task, agent);
 }
@@ -277,7 +284,7 @@ function buildContext(task) {
       title: t.title,
       role: t.role,
       roleLabel: ROLES[t.role]?.label || t.role,
-      agentName: getAgent(t.assignedTo)?.name || "ทีม",
+      agentName: dn(getAgent(t.assignedTo), t.jobId),
       output: t.output,
       attempts: t.attempts,
     });
@@ -293,7 +300,7 @@ function buildContext(task) {
     if (p) {
       reviewTarget = {
         title: p.title,
-        agentName: getAgent(p.assignedTo)?.name || "ทีม",
+        agentName: dn(getAgent(p.assignedTo), p.jobId),
         roleLabel: ROLES[p.role]?.label || p.role,
         output: p.output,
         attempts: p.attempts,
@@ -425,12 +432,12 @@ function finish(task, agent, result) {
   emitTask("task.completed", task, { from: agent.id, to: "captain" });
   emitAgent(agent);
   bus.log(
-    `✅ ${agent.name} ทำ "${task.title}" เสร็จใน ${fmtDuration(task.durationMs)} (ต้นทุน $${task.usage.costUsd.toFixed(4)}${toolNote})`,
+    `✅ ${dn(agent, task.jobId)} ทำ "${task.title}" เสร็จใน ${fmtDuration(task.durationMs)} (ต้นทุน $${task.usage.costUsd.toFixed(4)}${toolNote})`,
     { agentId: agent.id, taskId: task.id },
   );
   if (patch) {
     emitTask("task.patch", task, { action: "pending" });
-    bus.log(`🩹 ${agent.name} ส่ง patch ${patch.files.length} ไฟล์ รออนุมัติ (${patch.mode === "sim" ? "จำลอง" : "Claude Code"}) → ${patch.rel}${patch.rejected?.length ? ` — ตัดไฟล์นอกสิทธิ์ออก ${patch.rejected.length} ไฟล์: ${patch.rejected.map((r) => r.path).join(", ")}` : ""}`, { agentId: agent.id, taskId: task.id, jobId: task.jobId, level: patch.rejected?.length ? "warn" : undefined });
+    bus.log(`🩹 ${dn(agent, task.jobId)} ส่ง patch ${patch.files.length} ไฟล์ รออนุมัติ (${patch.mode === "sim" ? "จำลอง" : "Claude Code"}) → ${patch.rel}${patch.rejected?.length ? ` — ตัดไฟล์นอกสิทธิ์ออก ${patch.rejected.length} ไฟล์: ${patch.rejected.map((r) => r.path).join(", ")}` : ""}`, { agentId: agent.id, taskId: task.id, jobId: task.jobId, level: patch.rejected?.length ? "warn" : undefined });
   }
 
   if (task.reviewOfId && task.review) handleReview(task, agent);
@@ -448,7 +455,7 @@ function handleReview(reviewTask, reviewer) {
     producer.review = { ...r };
     recordQuality(producerAgent, r.score);
     emitTask("task.review", producer, { approved: true, score: r.score });
-    bus.log(`🏅 ${reviewer.name} ให้ "${producer.title}" ${r.score}/100 — ผ่าน`, { taskId: producer.id });
+    bus.log(`🏅 ${dn(reviewer, producer.jobId)} ให้ "${producer.title}" ${r.score}/100 — ผ่าน`, { taskId: producer.id });
     return;
   }
   const maxA = maxAttemptsFor(getJob(producer.jobId));
@@ -481,7 +488,7 @@ function handleReview(reviewTask, reviewer) {
   recordHandoff(reviewer, producerAgent);
   emitTask("task.handoff", producer, { from: reviewer.id, to: producer.pinnedAgentId, reason: producer.feedback, manual: false, score: r.score });
   emitTask("task.updated", reviewTask);
-  bus.log(`🔁 ${reviewer.name} ส่ง "${producer.title}" กลับให้ ${producerAgent?.name || "ทีม"} แก้ (คะแนน ${r.score}/100)`, { taskId: producer.id });
+  bus.log(`🔁 ${dn(reviewer, producer.jobId)} ส่ง "${producer.title}" กลับให้ ${dn(producerAgent, producer.jobId)} แก้ (คะแนน ${r.score}/100)`, { taskId: producer.id });
 }
 
 function fail(task, agent, err) {
@@ -501,7 +508,7 @@ function fail(task, agent, err) {
     task.progress = 0;
     task.phase = `ล้มเหลว จะลองใหม่ (${task.attempts}/${maxA})`;
     emitTask("task.failed", task, { retry: true, error: msg });
-    bus.log(`⚠️ ${agent.name} ทำ "${task.title}" ไม่สำเร็จ: ${msg} — กัปตันจะมอบหมายใหม่`, { taskId: task.id, level: "warn" });
+    bus.log(`⚠️ ${dn(agent, task.jobId)} ทำ "${task.title}" ไม่สำเร็จ: ${msg} — กัปตันจะมอบหมายใหม่`, { taskId: task.id, level: "warn" });
   } else {
     task.status = "failed";
     task.finishedAt = now();
@@ -625,7 +632,7 @@ export function handoff(taskId, toAgentId, reason = "") {
   task.history.push({ t: now(), type: "handoff", from: fromId, to: to.id, note: reason || "ส่งต่องานโดยผู้ควบคุม" });
   recordHandoff(from, to);
   emitTask("task.handoff", task, { from: fromId || "captain", to: to.id, reason, manual: true });
-  bus.log(`🔁 ผู้ควบคุมส่งต่อ "${task.title}" จาก ${from?.name || "กัปตัน"} ไปยัง ${to.name}${reason ? ` — ${reason}` : ""}`, { taskId: task.id });
+  bus.log(`🔁 ผู้ควบคุมส่งต่อ "${task.title}" จาก ${from ? dn(from, task.jobId) : "กัปตัน"} ไปยัง ${dn(to, task.jobId)}${reason ? ` — ${reason}` : ""}`, { taskId: task.id });
   tick();
   return task;
 }

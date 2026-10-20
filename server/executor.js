@@ -74,8 +74,8 @@ export function rosterFor(pack = null) {
     const o = pack ? { ...(pack.config.roles[a.role] || {}), ...(pack.config.agents[a.id] || {}) } : {};
     return {
       id: a.id,
-      name: a.name,
-      nick: a.nick,
+      name: o.name || a.name, // ชื่อเฉพาะโปรเจกต์ (project.json roles/agents .name) มาก่อนชื่อกลาง — การเลือกคนยังใช้ id
+      nick: o.nick || (o.name && a.nick === a.name ? o.name : a.nick),
       role: a.role,
       roleLabel: a.roleLabel,
       duties: o.duties || a.duties || "",

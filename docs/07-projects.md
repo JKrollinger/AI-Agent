@@ -64,7 +64,7 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
   },
   "plan": { "roles": ["researcher", "engineer", "coder"], "maxTasks": 5 },
   "roles": {
-    "coder": { "model": "claude-sonnet-5-5", "effort": "high", "instructions": "ใช้ TypeScript strict", "maxTokens": 24000 },
+    "coder": { "model": "claude-sonnet-5-5", "effort": "high", "instructions": "ใช้ TypeScript strict", "maxTokens": 24000, "name": "ทีม Backend" },
     "reviewer": { "instructions": "ตรวจว่ามี unit test ครบทุก endpoint" }
   },
   "agents": { "dev-1": { "duties": "เขียน API และ migration ของ MyShop" } },
@@ -83,8 +83,9 @@ node tools/grock.mjs run "ออกแบบระบบคูปองส่ว
 | `context.tree` | โครงสร้างไฟล์แบบกว้างก่อนลึก (ข้าม node_modules, .git, dist ฯลฯ ให้เอง) |
 | `plan.roles` | ตำแหน่งที่กัปตันใช้ได้ในโปรเจกต์นี้ (`[]` = ทุกตำแหน่ง) reviewer ใช้ได้เสมอ — ตัวลดต้นทุนที่ได้ผลที่สุด |
 | `plan.maxTasks` | งานผลิตสูงสุดต่อโจทย์ (1–8) ไม่นับงานตรวจ (reviewer) ที่ระบบเติมปิดท้ายให้เสมอ 1 ชิ้น — ตั้ง 2 จะได้ 2 งาน + QA 1 งาน |
-| `roles.<ตำแหน่ง>` | `model`, `effort`, `toolsEnabled`, `duties`, `instructions`, `maxTokens`, `skillMode: "replace"` เฉพาะโปรเจกต์นี้ |
+| `roles.<ตำแหน่ง>` | `model`, `effort`, `toolsEnabled`, `duties`, `instructions`, `maxTokens`, `skillMode: "replace"`, `name`, `nick` เฉพาะโปรเจกต์นี้ |
 | `agents.<id>` | เหมือน roles แต่เจาะจงคน (id เช่น `dev-1`) มาก่อน roles |
+| `roles.<ตำแหน่ง>.name` / `nick` | **ชื่อเรียกเฉพาะโปรเจกต์** (เช่น `"name": "ทีมคอนเทนต์"`) ใช้ใน prompt ของ AI (รายชื่อทีมที่กัปตันเห็น + ประโยคแนะนำตัวของคนทำ), ไฟล์ผลงานใน `.grock/out/` (บรรทัด "ผู้ทำ:") และบรรทัด log ของโจทย์โปรเจกต์นี้ — หน้าเว็บ/ฉาก 3 มิติยังแสดงชื่อกลางของทีม (ตั้งที่ ⚙ ตั้งค่า AI) การมอบหมายใช้ `id` จึงไม่กระทบ |
 | `permissions.<id>` | สิทธิ์ **แก้ไฟล์จริง** ของเอเจนต์นั้น (`write` glob, `deny`, `tools` ของ Claude Code, `maxUsd`, `timeoutSec`) ไม่ตั้ง = ไม่มีสิทธิ์ ทีมได้แค่เสนอ — ดูข้อ 5 |
 | `qa.maxAttempts` / `passScore` | จำนวนรอบแก้สูงสุด / คะแนนผ่าน |
 | `budget.maxUsdPerJob` | เมื่อใช้เงินเกิน ระบบหยุดงานที่กำลังทำและที่เหลือ แล้วปิดโจทย์เป็น failed (ผลงานที่เสร็จแล้วยังถูกบันทึก) `0` = ไม่จำกัด · ไม่ตั้ง = ใช้ `MAX_USD_PER_JOB` ใน .env |

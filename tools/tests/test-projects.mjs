@@ -214,5 +214,27 @@ console.log("✅ attachWriter (tasks/NN-role-slug.md, job.json, plan.json, resul
   console.log("✅ review fixes: output.dir ใต้ .grock, plan.roles, docsIndex ราก, placement/brief split, budget null/0, id แปลก 404, forbidden roots, cache ตาม always, eviction");
 }
 
+// ชื่อเฉพาะโปรเจกต์ (roles.<role>.name / agents.<id>.name): ผ่านการตรวจ, ผสานใน effectiveAgent/displayNameFor, ค่าผิดถูกข้ามพร้อมคำเตือน
+{
+  fs.writeFileSync(path.join(root, ".grock", "project.json"), JSON.stringify({ roles: { marketer: { name: "  ทีม  คอนเทนต์ ", nick: "คอน" }, coder: { name: "" } }, agents: { "res-1": { name: "x".repeat(60), nick: 5 } } }), "utf8");
+  const pk = P.loadPack("myshop", { force: true }), cfg = pk.config, w = pk.warnings;
+  assert.equal(cfg.roles.marketer.name, "ทีม คอนเทนต์");
+  assert.equal(cfg.roles.marketer.nick, "คอน");
+  assert.equal(cfg.roles.coder.name, undefined, "ชื่อว่างต้องถูกข้าม");
+  assert.equal(cfg.agents["res-1"].name.length, 40, "ชื่อยาวถูกตัดที่ 40");
+  assert.equal(cfg.agents["res-1"].nick, undefined, "nick ที่ไม่ใช่ข้อความต้องถูกข้าม");
+  assert.ok(w.some((x) => /coder.*name/.test(x)) && w.some((x) => /res-1.*nick/.test(x)), "ต้องมีคำเตือนสำหรับค่าที่ข้าม: " + JSON.stringify(w));
+  const pack = { config: cfg };
+  const base = { id: "mkt-1", name: "นักการตลาด", nick: "ริน", role: "marketer", model: "claude-sonnet-5-5" };
+  const eff = P.effectiveAgent(base, pack);
+  assert.equal(eff.name, "ทีม คอนเทนต์"); assert.equal(eff.nick, "คอน"); assert.ok(eff.projectOverrides.includes("name"));
+  const eff2 = P.effectiveAgent({ id: "res-1", name: "นักวิจัย", nick: "นักวิจัย", role: "researcher" }, pack);
+  assert.equal(eff2.nick, eff2.name, "ไม่มี nick แยกและเดิม nick = name → ตามชื่อใหม่");
+  assert.equal(P.displayNameFor(base, pack), "ทีม คอนเทนต์");
+  assert.equal(P.displayNameFor(base, null), "นักการตลาด");
+  assert.equal(P.effectiveAgent({ id: "dev-1", name: "นักพัฒนา", nick: "โค้ด", role: "coder" }, pack).name, "นักพัฒนา", "ชื่อที่ถูกข้ามต้องไม่ทับชื่อกลาง");
+  console.log("✅ project names: roles/agents .name/.nick ผ่านการตรวจ ผสานใน effectiveAgent/displayNameFor");
+}
+
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log("PROJECTS UNIT ALL PASSED");

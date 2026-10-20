@@ -8,7 +8,7 @@ import { bus } from "./bus.js";
 import { state, snapshot } from "./state.js";
 import * as orch from "./orchestrator.js";
 import { liveAvailable, countTokens } from "./llm.js";
-import { listProjects, registerProject, loadPack, buildProjectContext, reloadPacks, attachWriter } from "./projects.js";
+import { listProjects, registerProject, loadPack, buildProjectContext, reloadPacks, attachWriter, displayNameFor } from "./projects.js";
 import { WORKER_MODEL } from "./agents.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -227,7 +227,7 @@ async function handleApi(req, res, url) {
 }
 
 // เขียนผลงานกลับเข้าโปรเจกต์ (เมื่อโจทย์ผูกกับ Project Pack) — ทำงานทั้งโหมด sim และ live
-attachWriter(bus, { agentNameOf: (id) => state.agents.get(id)?.name || "" });
+attachWriter(bus, { agentNameOf: (id, pack) => displayNameFor(state.agents.get(id), pack) || "" }); // ไฟล์ใน .grock/out ใช้ชื่อเฉพาะโปรเจกต์ (project.json roles/agents .name)
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);

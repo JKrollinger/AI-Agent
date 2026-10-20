@@ -308,7 +308,11 @@ function validateOverride(src = {}, { allowDuties = true, allowInstructions = fa
   if (allowInstructions && typeof src.instructions === "string" && src.instructions.trim()) out.instructions = src.instructions.trim().slice(0, 2000);
   if (src.maxTokens !== undefined) out.maxTokens = clampInt(src.maxTokens, 2000, 64000, undefined);
   if (src.skillMode === "replace" || src.skillMode === "append") out.skillMode = src.skillMode;
-  const known = new Set(["model", "effort", "toolsEnabled", "duties", "instructions", "maxTokens", "skillMode"]);
+  // ชื่อ/ชื่อเล่นเฉพาะโปรเจกต์: ใช้ใน prompt, ไฟล์ผลงานใน .grock/out และ log ของโจทย์โปรเจกต์นี้ (หน้าเว็บยังแสดงชื่อกลางของทีม)
+  const cleanName = (v, max) => (typeof v === "string" ? stripCtl(v).replace(/\s+/g, " ").trim().slice(0, max) : "");
+  if (src.name !== undefined) { const n = cleanName(src.name, 40); if (n) out.name = n; else warnings.push(`${where}: name ต้องเป็นข้อความ 1–40 ตัวอักษร — ข้าม`); }
+  if (src.nick !== undefined) { const k = cleanName(src.nick, 24); if (k) out.nick = k; else warnings.push(`${where}: nick ต้องเป็นข้อความ 1–24 ตัวอักษร — ข้าม`); }
+  const known = new Set(["model", "effort", "toolsEnabled", "duties", "instructions", "maxTokens", "skillMode", "name", "nick"]);
   for (const k of Object.keys(src)) if (!known.has(k)) warnings.push(`${where}: ไม่รู้จักคีย์ "${stripCtl(k).slice(0, 60)}" — ข้าม`);
   return out;
 }
@@ -729,11 +733,17 @@ export function effectiveAgent(agent, pack) {
   const layers = [pack.config.roles[agent.role] || {}, pack.config.agents[agent.id] || {}];
   const out = { ...agent, projectOverrides: [] };
   for (const layer of layers) {
-    for (const k of ["model", "effort", "toolsEnabled", "duties", "instructions", "maxTokens", "skillMode"]) {
+    for (const k of ["model", "effort", "toolsEnabled", "duties", "instructions", "maxTokens", "skillMode", "name", "nick"]) {
       if (layer[k] !== undefined && layer[k] !== out[k]) { out[k] = layer[k]; if (!out.projectOverrides.includes(k)) out.projectOverrides.push(k); }
     }
   }
+  if (out.projectOverrides.includes("name") && !out.projectOverrides.includes("nick") && agent.nick === agent.name) out.nick = out.name; // ไม่มีชื่อเล่นแยก → ตามชื่อใหม่
   return out;
+}
+/** ชื่อที่ใช้เรียกคนนี้ในบริบทของโปรเจกต์ (roles.<role>.name / agents.<id>.name) หรือชื่อกลางเมื่อไม่มี pack */
+export function displayNameFor(agent, pack) {
+  if (!agent) return "";
+  return pack ? effectiveAgent(agent, pack).name : agent.name;
 }
 
 /** ทักษะเพิ่มเฉพาะโปรเจกต์ของตำแหน่ง → { text, replace } | null */
@@ -850,7 +860,7 @@ function resultMarkdown(ctx, job) {
 }
 
 /** สมัครรับเหตุการณ์จาก bus แล้วเขียนไฟล์ผลงานเข้าโปรเจกต์ (ทำงานครั้งเดียวตอนเริ่มเซิร์ฟเวอร์) */
-export function attachWriter(bus, { agentNameOf = () => "" } = {}) {
+export function attachWriter(bus, { agentNameOf = () => "" } = {}) { // agentNameOf(id, pack) → ชื่อเฉพาะโปรเจกต์ถ้ามี
   const handler = (ev) => {
     try {
       const d = ev.data || {};
@@ -859,7 +869,7 @@ export function attachWriter(bus, { agentNameOf = () => "" } = {}) {
         const ctx = getJobContext(task.jobId); if (!ctx) return;
         ctx.tasks.set(task.id, task);
         if (ev.type === "task.completed" || (ev.type === "task.failed" && !d.retry)) {
-          writeFileAtomic(path.join(ctx.outDir, "tasks", taskFileName(task)), taskMarkdown(task, agentNameOf(task.assignedTo)));
+          writeFileAtomic(path.join(ctx.outDir, "tasks", taskFileName(task)), taskMarkdown(task, agentNameOf(task.assignedTo, ctx.pack)));
         }
         const job = d.job || ctx.job; if (job) writeFileAtomic(path.join(ctx.outDir, "job.json"), jobJson(ctx, job));
       } else if (ev.type === "job.planned") {
