@@ -241,16 +241,21 @@ async function handle(msg) {
   }
 }
 
+// เมื่อ stdin ปิด (ไคลเอนต์จบ หรือใช้แบบ pipe ทีละชุด) รอให้คำขอที่ค้างตอบครบก่อนค่อยออก
+let inflight = 0;
+let closing = false;
+const shutdown = () => setTimeout(() => process.exit(0), 20); // ออกนอก event ที่กำลังปิด handle (กัน assertion ของ libuv บน Windows)
+const track = (p) => { inflight++; p.finally(() => { inflight--; if (closing && inflight === 0) shutdown(); }); };
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on("line", (line) => {
   const s = line.trim();
   if (!s) return;
   let msg;
   try { msg = JSON.parse(s); } catch { return fail(null, -32700, "JSON ไม่ถูกต้อง"); }
-  if (Array.isArray(msg)) { for (const m of msg) void handle(m); return; }
+  if (Array.isArray(msg)) { for (const m of msg) track(handle(m)); return; }
   if (!msg || typeof msg !== "object" || !msg.method) { if (msg?.id !== undefined && !("result" in msg) && !("error" in msg)) fail(msg.id, -32600, "คำขอไม่ถูกต้อง"); return; }
-  void handle(msg);
+  track(handle(msg));
 });
-rl.on("close", () => process.exit(0));
+rl.on("close", () => { closing = true; if (inflight === 0) shutdown(); });
 process.stdin.on("error", () => process.exit(0));
 if (!TOKEN) process.stderr.write("⚠️ ไม่มี GROCK_TOKEN — ถ้าเซิร์ฟเวอร์ตั้ง API_TOKENS/AUTH_PASSWORD ไว้ ทุกคำขอจะได้ 401 (ตั้ง GROCK_TOKEN ใน env ของ MCP server)\n");
