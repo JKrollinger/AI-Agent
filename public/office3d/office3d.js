@@ -8,7 +8,11 @@ const stage = document.getElementById('stage');
 
 // ---------- Renderer ----------
 const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+// ความคมชัด: เรนเดอร์ละเอียดกว่าจอ (อย่างน้อย 1.5 เท่า) แล้วให้เบราว์เซอร์ย่อลง = ขอบวัตถุ/ตัวหนังสือบนป้ายคมขึ้น
+// จำกัดจำนวนพิกเซลรวมไว้ ~4.6 ล้าน (≈2480×1860) เพื่อไม่ให้ GPU อ่อน ๆ หรือมือถือกระตุก
+const MAX_RENDER_PX = 4.6e6;
+function fitPixelRatio(w,h){ const want=Math.max(devicePixelRatio||1, 1.5); const cap=Math.sqrt(MAX_RENDER_PX/Math.max(1,w*h)); return Math.max(1, Math.min(want, cap, 3)); }
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -72,51 +76,52 @@ const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(s
 }
 
 // ---------- Texture helpers ----------
-const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+const maxAniso = Math.min(16, renderer.capabilities.getMaxAnisotropy()); // ลายพื้น/ไม้คมเมื่อมองเฉียง
 function canvas(w,h,draw){ const c=document.createElement('canvas'); c.width=w; c.height=h; draw(c.getContext('2d'),w,h); return c; }
 function tex(c,rep){ const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding; t.anisotropy=maxAniso;
   if(rep){ t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(rep[0],rep[1]); } return t; }
 function noise(ctx,w,h,amt){ const d=ctx.getImageData(0,0,w,h); for(let i=0;i<d.data.length;i+=4){ const n=(Math.random()-0.5)*amt;
   d.data[i]+=n; d.data[i+1]+=n; d.data[i+2]+=n; } ctx.putImageData(d,0,0); }
 
-// Oak plank floor (texture = 4 m square)
-const floorTex = tex(canvas(1024,1024,(g,w,h)=>{
-  const rows=22, ph=h/rows;
+// Oak plank floor (texture = 4 m square) — 2048² เพื่อให้ร่องไม้/ลายเสี้ยนคมเมื่อซูมเข้าโต๊ะ
+const floorTex = tex(canvas(2048,2048,(g,w,h)=>{
+  const S=w/1024, rows=22, ph=h/rows;
   for(let r=0;r<rows;r++){
     let x=rnd()*w; const y=r*ph;
     while(x < w*2){
-      const len = 300 + rnd()*220, L=52+rnd()*10, S=28+rnd()*14;
+      const len = (300 + rnd()*220)*S, L=52+rnd()*10, Sat=28+rnd()*14;
       const draw = ox => {
-        g.fillStyle=`hsl(${30+rnd()*6},${S}%,${L}%)`; g.fillRect(ox,y,len,ph);
-        for(let k=0;k<14;k++){ g.strokeStyle=`rgba(90,55,25,${0.05+rnd()*0.1})`; g.lineWidth=0.6+rnd()*1.4; g.beginPath();
-          const y0=y+rnd()*ph, f=0.004+rnd()*0.01, a=1+rnd()*3, p=rnd()*6;
-          for(let xx=0;xx<=len;xx+=8) g.lineTo(ox+xx, y0+Math.sin(xx*f+p)*a); g.stroke(); }
-        g.fillStyle='rgba(50,30,15,.55)'; g.fillRect(ox,y,1.5,ph);
+        g.fillStyle=`hsl(${30+rnd()*6},${Sat}%,${L}%)`; g.fillRect(ox,y,len,ph);
+        for(let k=0;k<18;k++){ g.strokeStyle=`rgba(90,55,25,${0.05+rnd()*0.1})`; g.lineWidth=(0.6+rnd()*1.4)*S; g.beginPath();
+          const y0=y+rnd()*ph, f=(0.004+rnd()*0.01)/S, a=(1+rnd()*3)*S, p=rnd()*6;
+          for(let xx=0;xx<=len;xx+=8*S) g.lineTo(ox+xx, y0+Math.sin(xx*f+p)*a); g.stroke(); }
+        g.fillStyle='rgba(50,30,15,.55)'; g.fillRect(ox,y,1.5*S,ph);
+        g.fillStyle='rgba(255,255,255,.06)'; g.fillRect(ox+1.5*S,y,1.2*S,ph); // ขอบไม้รับแสง
       };
       draw(x-w*2); draw(x-w); draw(x);
       x += len;
     }
-    g.fillStyle='rgba(50,30,15,.5)'; g.fillRect(0,y,w,1.2);
+    g.fillStyle='rgba(50,30,15,.5)'; g.fillRect(0,y,w,1.2*S);
   }
   noise(g,w,h,10);
 }),[26/4,18/4]);
 
-// Carpet tiles (texture = 1 m, four 50 cm tiles)
-const carpetTex = tex(canvas(512,512,(g,w,h)=>{
-  g.fillStyle='#5a636f'; g.fillRect(0,0,w,h);
+// Carpet tiles (texture = 1 m, four 50 cm tiles) — 1024²
+const carpetTex = tex(canvas(1024,1024,(g,w,h)=>{
+  const T=w/2; g.fillStyle='#5a636f'; g.fillRect(0,0,w,h);
   for(let tx=0;tx<2;tx++) for(let ty=0;ty<2;ty++){
-    const vert=(tx+ty)%2; g.save(); g.beginPath(); g.rect(tx*256,ty*256,256,256); g.clip();
-    for(let i=0;i<256;i+=3){ g.fillStyle=`rgba(255,255,255,${0.02+Math.random()*0.03})`;
-      vert? g.fillRect(tx*256+i,ty*256,1.2,256) : g.fillRect(tx*256,ty*256+i,256,1.2); }
-    g.restore(); g.strokeStyle='rgba(0,0,0,.18)'; g.strokeRect(tx*256+.5,ty*256+.5,255,255);
+    const vert=(tx+ty)%2; g.save(); g.beginPath(); g.rect(tx*T,ty*T,T,T); g.clip();
+    for(let i=0;i<T;i+=3){ g.fillStyle=`rgba(255,255,255,${0.02+Math.random()*0.03})`;
+      vert? g.fillRect(tx*T+i,ty*T,1.4,T) : g.fillRect(tx*T,ty*T+i,T,1.4); }
+    g.restore(); g.strokeStyle='rgba(0,0,0,.18)'; g.lineWidth=2; g.strokeRect(tx*T+1,ty*T+1,T-2,T-2);
   }
   noise(g,w,h,26);
 }),[14,17.4]);
 
 function woodTex(hue,sat,light,spanX,spanY){
-  return tex(canvas(1024,512,(g,w,h)=>{
+  return tex(canvas(2048,1024,(g,w,h)=>{
     g.fillStyle=`hsl(${hue},${sat}%,${light}%)`; g.fillRect(0,0,w,h);
-    for(let k=0;k<160;k++){ g.strokeStyle=`rgba(60,35,15,${0.03+rnd()*0.09})`; g.lineWidth=0.5+rnd()*2; g.beginPath();
+    for(let k=0;k<320;k++){ g.strokeStyle=`rgba(60,35,15,${0.03+rnd()*0.09})`; g.lineWidth=0.5+rnd()*2; g.beginPath();
       const y0=rnd()*h, f=0.002+rnd()*0.006, a=2+rnd()*8, p=rnd()*6;
       for(let x=0;x<=w;x+=10) g.lineTo(x, y0+Math.sin(x*f+p)*a); g.stroke(); }
     noise(g,w,h,8);
@@ -191,8 +196,8 @@ const M = {
   black: mat(0x1e2126,{roughness:0.5, metalness:0.4}),
   alu: mat(0xb9bec4,{roughness:0.35, metalness:0.85}),
   steel: mat(0xc9ced3,{roughness:0.3, metalness:0.7}),
-  oak: mat(0xffffff,{map:oakTex, roughness:0.55}),
-  walnut: mat(0xffffff,{map:walnutTex, roughness:0.45}),
+  oak: mat(0xffffff,{map:oakTex, bumpMap:oakTex, bumpScale:0.004, roughness:0.55}),
+  walnut: mat(0xffffff,{map:walnutTex, bumpMap:walnutTex, bumpScale:0.004, roughness:0.45}),
   white: mat(0xf2f1ee,{roughness:0.5}),
   fabric: mat(0x2f343c,{roughness:0.95}),
   leather: mat(0x8a5233,{roughness:0.55}),
@@ -217,9 +222,9 @@ const lamps=[];
 // ---------- Building shell ----------
 const W=26, D=18;
 add(B(W+0.6,0.5,D+0.6), mat(0x9a9d9f,{roughness:0.9}), 0,-0.25,0, scene,{cast:false});
-const floor = add(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.45}), 0,0.001,0, scene,{cast:false});
+const floor = add(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:floorTex, bumpMap:floorTex, bumpScale:0.012, roughness:0.45}), 0,0.001,0, scene,{cast:false});
 floor.rotation.x=-Math.PI/2;
-const carpet = add(new THREE.PlaneGeometry(14,17.4), new THREE.MeshStandardMaterial({map:carpetTex, roughness:1}), -6,0.008,0, scene,{cast:false});
+const carpet = add(new THREE.PlaneGeometry(14,17.4), new THREE.MeshStandardMaterial({map:carpetTex, bumpMap:carpetTex, bumpScale:0.02, roughness:1}), -6,0.008,0, scene,{cast:false});
 carpet.rotation.x=-Math.PI/2;
 
 // Curtain-wall glazing on the back (north) and left (west) sides
@@ -229,7 +234,9 @@ function curtainWall(len, along){ // along: 'x' at z=-D/2, 'z' at x=-W/2
   add(B(len,0.35,0.25), M.white, 0,0.175,0, g);              // sill
   add(B(len,0.12,0.18), M.frame, 0,H,0, g);                 // head
   add(B(len,0.06,0.1), M.frame, 0,2.35,0, g);               // transom
-  for(let x=-len/2; x<=len/2+0.01; x+=1.625) add(B(0.07,H,0.16), M.frame, x,H/2,0, g);
+  for(let x=-len/2; x<=len/2+0.01; x+=1.625){ add(B(0.07,H,0.16), M.frame, x,H/2,0, g); add(B(0.05,H-0.4,0.05), M.alu, x,0.35+(H-0.35)/2,0.1, g,{cast:false}); } // เสาเฟรม + ฝาครอบอลูมิเนียม
+  add(B(len,0.03,0.3), M.alu, 0,0.36,0, g,{cast:false});                                 // ฝาครอบขอบหน้าต่าง
+  add(B(len,0.05,0.14), M.alu, 0,2.35,0.06, g,{cast:false});                             // ฝาครอบคานกลาง
   const gl=add(B(len,H-0.35,0.02), M.glass, 0,0.35+(H-0.35)/2,0, g,{cast:false,receive:false});
   // roller blinds pulled halfway on some bays
   for(let x=-len/2+0.81, i=0; x<len/2; x+=1.625, i++){
@@ -238,7 +245,20 @@ function curtainWall(len, along){ // along: 'x' at z=-D/2, 'z' at x=-W/2
 }
 curtainWall(W,'x'); curtainWall(D,'z');
 // structural columns
-[[-W/2+0.2,-D/2+0.2],[1.6,-D/2+0.2],[-W/2+0.2,0.4]].forEach(([x,z])=>add(B(0.45,3.1,0.45), M.white, x,1.55,z));
+[[-W/2+0.2,-D/2+0.2],[1.6,-D/2+0.2],[-W/2+0.2,0.4]].forEach(([x,z])=>{ add(B(0.45,3.1,0.45), M.white, x,1.55,z);
+  add(B(0.53,0.1,0.53), M.steel, x,0.05,z, scene,{cast:false}); add(B(0.5,0.06,0.5), M.steel, x,3.07,z, scene,{cast:false}); }); // ฐาน/หัวเสาสแตนเลส
+// ด้านใต้ (z=+D/2) เปิดโล่งมองเห็นเมือง: ขอบพื้นชั้น + ราวกันตกกระจก (ออฟฟิศอยู่ชั้นสูงของตึก)
+{ const EDGE=D/2+0.1, Hh=1.02;
+  add(B(W+0.3,0.08,0.12), M.alu, 0,0.04,EDGE-0.06, scene,{cast:false});
+  for(let x=-W/2; x<=W/2+0.01; x+=2.6) add(B(0.05,Hh,0.05), M.steel, x,Hh/2,EDGE, scene);
+  add(B(W,0.78,0.014), M.glass, 0,0.56,EDGE, scene,{cast:false,receive:false});
+  add(B(W+0.1,0.05,0.07), M.steel, 0,Hh,EDGE, scene,{cast:false});
+  add(B(W+0.1,0.03,0.05), M.steel, 0,0.14,EDGE, scene,{cast:false});
+}
+// แถบอลูมิเนียมรอยต่อพรม–พื้นไม้
+add(B(0.06,0.014,17.4), M.alu, 1.0,0.012,0, scene,{cast:false});
+add(B(14,0.014,0.06), M.alu, -6,0.012,8.7, scene,{cast:false});
+add(B(14,0.014,0.06), M.alu, -6,0.012,-8.7, scene,{cast:false});
 
 // ---------- Office chair ----------
 const G = {
@@ -692,32 +712,52 @@ const signTex=tex(canvas(1024,224,(g,w,h)=>{
 
 // ---------- City outside the windows ----------
 const cityMats=[];
-function facade(base,glass,litP){
-  const W=256,H=256, cols=8, rows=4;
+// texture หนึ่งผืน = ผนัง 12 ม. × 12 ม. (16 × 8 ช่องหน้าต่าง) ที่ 1024² → 1 px ≈ 1.2 ซม. ตึกคมแม้ซูมเข้าหน้าต่าง
+function facade(base,glass,litP,style=0){
+  const W=1024,H=1024, cols=16, rows=8, cw=W/cols, rh=H/rows;
   const map=canvas(W,H,(g)=>{ g.fillStyle=base; g.fillRect(0,0,W,H);
-    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){ g.fillStyle=glass; g.fillRect(c*32+4,r*64+10,24,44);
-      g.fillStyle='rgba(255,255,255,.08)'; g.fillRect(c*32+4,r*64+10,24,12); } });
+    for(let r=0;r<rows;r++){ g.fillStyle='rgba(0,0,0,.10)'; g.fillRect(0,r*rh,W,3); g.fillStyle='rgba(255,255,255,.07)'; g.fillRect(0,r*rh+rh-14,W,2); } // คานพื้นแต่ละชั้น
+    for(let c=0;c<cols;c++){ g.fillStyle='rgba(0,0,0,.08)'; g.fillRect(c*cw,0,2,H); }                                                       // รอยต่อแผ่นผนัง
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){ const x=c*cw+8, y=r*rh+18, w=cw-16, h=rh-44;
+      g.fillStyle='rgba(0,0,0,.35)'; g.fillRect(x-2,y-2,w+4,h+4);                                   // กรอบหน้าต่าง (เงา)
+      g.fillStyle=glass; g.fillRect(x,y,w,h);
+      const grd=g.createLinearGradient(0,y,0,y+h); grd.addColorStop(0,'rgba(255,255,255,.22)'); grd.addColorStop(.5,'rgba(255,255,255,.04)'); grd.addColorStop(1,'rgba(0,0,0,.12)');
+      g.fillStyle=grd; g.fillRect(x,y,w,h);                                                          // เงาสะท้อนท้องฟ้า
+      g.fillStyle='rgba(255,255,255,.18)'; g.fillRect(x+w/2-1,y,2,h);                                // เสากลางหน้าต่าง
+      if(style===1){ g.fillStyle='rgba(255,255,255,.14)'; g.fillRect(x,y+h*0.5-1,w,2); }
+      if(rnd()<0.3){ const bh=h*(0.25+rnd()*0.5); g.fillStyle='rgba(230,226,214,.55)'; g.fillRect(x+2,y+2,w-4,bh);
+        g.fillStyle='rgba(0,0,0,.12)'; for(let yy=y+6;yy<y+bh;yy+=6) g.fillRect(x+2,yy,w-4,1); }     // มู่ลี่บางห้อง
+    }
+    noise(g,W,H,6); });
   const em=canvas(W,H,(g)=>{ g.fillStyle='#000'; g.fillRect(0,0,W,H);
-    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(Math.random()<litP){ g.fillStyle=Math.random()<0.8?'#ffd9a0':'#cfe6ff'; g.fillRect(c*32+4,r*64+10,24,44); } });
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(rnd()<litP){ const x=c*cw+8, y=r*rh+18, w=cw-16, h=rh-44;
+      g.fillStyle=rnd()<0.8?'#ffd9a0':'#cfe6ff'; g.fillRect(x,y,w,h);
+      g.fillStyle='rgba(0,0,0,.35)'; if(rnd()<0.5) g.fillRect(x,y,w,h*0.45); else g.fillRect(x+w*0.55,y,w*0.45,h); // ห้องสว่างไม่เท่ากัน
+    } });
   const t1=tex(map), t2=tex(em); [t1,t2].forEach(t=>{ t.wrapS=t.wrapT=THREE.RepeatWrapping; });
-  const m=new THREE.MeshStandardMaterial({map:t1, emissive:0xffffff, emissiveMap:t2, emissiveIntensity:0.1, roughness:0.45, metalness:0.15});
+  const m=new THREE.MeshStandardMaterial({map:t1, emissive:0xffffff, emissiveMap:t2, emissiveIntensity:0.12, roughness:0.4, metalness:0.2});
   cityMats.push(m); return m;
 }
-const facades=[facade('#b9bcc0','#3d4a5a',0.35),facade('#d8cfc2','#4a5563',0.45),facade('#7f8a96','#2a3644',0.3),facade('#9fb3c4','#5a7189',0.4)];
+const facades=[facade('#b9bcc0','#3d4a5a',0.35),facade('#d8cfc2','#4a5563',0.45),facade('#7f8a96','#2a3644',0.3),facade('#9fb3c4','#5a7189',0.4),facade('#2f3540','#1b2230',0.5,1)];
+const parapetM=mat(0x6d7075,{roughness:0.85});
 const roofM=mat(0x8a8d90,{roughness:0.9});
 function building(x,z,w,d,top,fm){
   const base=-62, h=top-base, geo=new THREE.BoxGeometry(w,h,d);
   const uv=geo.attributes.uv, dims=[[d,h],[d,h],[w,d],[w,d],[w,h],[w,h]];
   for(let f=0;f<6;f++) for(let v=0;v<4;v++){ const i=f*4+v; uv.setXY(i, uv.getX(i)*dims[f][0]/12, uv.getY(i)*dims[f][1]/12); }
   const b=new THREE.Mesh(geo,[fm,fm,roofM,roofM,fm,fm]); b.position.set(x,base+h/2,z); b.receiveShadow=true; scene.add(b);
-  if(rnd()<0.6){ const u=new THREE.Mesh(B(w*0.3,1.6,d*0.3),roofM); u.position.set(x+(rnd()-0.5)*w*0.4,top+0.8,z+(rnd()-0.5)*d*0.4); scene.add(u); }
-  if(rnd()<0.25){ const a=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.12,6,6),M.frame); a.position.set(x,top+3,z); scene.add(a); }
+  const rim=new THREE.Mesh(B(w+0.3,0.5,d+0.3),parapetM); rim.position.set(x,top+0.1,z); scene.add(rim);              // ขอบกันตกบนดาดฟ้า
+  const n=1+Math.floor(rnd()*3);                                                                                       // เครื่องปรับอากาศ/ห้องเครื่องบนดาดฟ้า
+  for(let i=0;i<n;i++){ const u=new THREE.Mesh(B(w*(0.12+rnd()*0.18),0.9+rnd()*1.2,d*(0.12+rnd()*0.18)),roofM); u.position.set(x+(rnd()-0.5)*w*0.6,top+0.8,z+(rnd()-0.5)*d*0.6); scene.add(u); }
+  if(rnd()<0.35){ const rr=Math.min(w,d)*0.1, tank=new THREE.Mesh(new THREE.CylinderGeometry(rr,rr,1.8,12),M.alu); tank.position.set(x+(rnd()-0.5)*w*0.5,top+1.2,z+(rnd()-0.5)*d*0.5); scene.add(tank); } // ถังน้ำ
+  if(rnd()<0.3){ const a=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.12,7,6),M.frame); a.position.set(x,top+3.5,z); scene.add(a);
+    const beacon=new THREE.Mesh(new THREE.SphereGeometry(0.18,8,6),new THREE.MeshBasicMaterial({color:0xff3b3b})); beacon.position.set(x,top+7.1,z); scene.add(beacon); } // เสาอากาศ + ไฟแดง
 }
 // our own tower below the office floor
 { const tw=new THREE.BoxGeometry(W+0.6,61.5,D+0.6), uv=tw.attributes.uv, dims=[[D,61.5],[D,61.5],[W,D],[W,D],[W,61.5],[W,61.5]];
   for(let f=0;f<6;f++) for(let v=0;v<4;v++){ const i=f*4+v; uv.setXY(i,uv.getX(i)*dims[f][0]/12,uv.getY(i)*dims[f][1]/12); }
   const t=new THREE.Mesh(tw,facades[3]); t.position.set(0,-62+61.5/2,0); scene.add(t); }
-for(let k=0;k<90;k++){
+for(let k=0;k<120;k++){
   const a=rnd()*Math.PI*2, r=24+rnd()*50;
   const x=Math.cos(a)*r, z=Math.sin(a)*r;
   if(Math.abs(x)<20 && Math.abs(z)<16) continue;
@@ -729,7 +769,8 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(400,400),mat(0x5b6158,{rough
 // ---------- Lighting & sun cycle ----------
 const hemi = new THREE.HemisphereLight(lin(0xe6eeff), lin(0x8a7a66), 0.35); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-sun.castShadow = true; sun.shadow.mapSize.set(2048,2048);
+const SHADOW_RES = (Math.min(screen.width,screen.height)>=700 && renderer.capabilities.maxTextureSize>=8192) ? 4096 : 2048; // เงาคมขึ้นบนเดสก์ท็อป
+sun.castShadow = true; sun.shadow.mapSize.set(SHADOW_RES,SHADOW_RES);
 Object.assign(sun.shadow.camera,{left:-18,right:18,top:18,bottom:-18,near:1,far:90});
 sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.025; sun.shadow.radius=3;
 scene.add(sun); scene.add(sun.target);
@@ -946,6 +987,9 @@ const tagV=new THREE.Vector3();
 const TOOL_TH=Object.assign({web_search:'🔎 ค้นเว็บ',web_fetch:'🌐 อ่านหน้าเว็บ',code_execution:'⚙️ รันโค้ด',bash_code_execution:'⚙️ รันโค้ด',text_editor_code_execution:'📝 แก้ไฟล์',claude_code:'🛠️ Claude Code'},CFG.toolLabels||{});
 function updateTags(t){
   const r=renderer.domElement.getBoundingClientRect();
+  // ขนาดป้าย: ย่อตามความสูงของเวที (จอมือถือ 70%) และตามระยะกล้องเทียบกับมุมเริ่มต้น (ซูมเข้า → ใหญ่ขึ้นเล็กน้อย, ถอยออก → เล็กลง)
+  const fs=Math.min(1,Math.max(0.7,r.height/640)), dist=camera.position.distanceTo(controls.target), home=HOME.pos.distanceTo(HOME.target);
+  const ts=(fs*Math.min(1.15,Math.max(0.85,Math.sqrt(home/Math.max(1,dist))))).toFixed(3);
   tagList.forEach(o=>{
     const w=o.w, show=tagsOn && w.g.visible;
     if(!show){ o.el.style.display='none'; return; }
@@ -953,7 +997,7 @@ function updateTags(t){
     if(tagV.z>1){ o.el.style.display='none'; return; }
     o.el.style.display='';
     const x=(tagV.x*0.5+0.5)*r.width, y=(-tagV.y*0.5+0.5)*r.height;
-    o.el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;
+    o.el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%) scale(${ts})`;
     if(o.nameEl.textContent!==w.name) o.nameEl.textContent=w.name;
     if(o.roleEl.textContent!==w.role) o.roleEl.textContent=w.role;
     if(w.bubbleT>0){ w.bubbleT-=1/60; o.bubble.hidden=false; if(o.bubble.textContent!==w.bubbleText) o.bubble.textContent=w.bubbleText; } else o.bubble.hidden=true;
@@ -1454,7 +1498,7 @@ function pose(w,t,dt,sdt){
   if(!w.npc) counts[w.state]=(counts[w.state]||0)+1;
 }
 
-function resize(){ const r=stage.getBoundingClientRect(); renderer.setSize(r.width,r.height,false);
+function resize(){ const r=stage.getBoundingClientRect(); renderer.setPixelRatio(fitPixelRatio(r.width,r.height)); renderer.setSize(r.width,r.height,false);
   camera.aspect=r.width/r.height; camera.fov = r.width<600?52:38; camera.updateProjectionMatrix(); }
 addEventListener('resize',resize); resize();
 

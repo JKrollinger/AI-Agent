@@ -46,7 +46,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .clock .mode{display:flex;margin-top:4px}
 .hint{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:12px;color:var(--muted);pointer-events:none;padding-inline:16px}
 #tags{position:fixed;inset:0;pointer-events:none;overflow:hidden}
-.tag{position:absolute;left:0;top:0;display:grid;justify-items:center;gap:1px;white-space:nowrap;will-change:transform;
+.tag{position:absolute;left:0;top:0;display:grid;justify-items:center;gap:1px;white-space:nowrap;will-change:transform;transform-origin:50% 100%;
   font-family:var(--sans);text-shadow:0 0 3px #000,0 1px 2px #000,0 0 1px #000}
 .tag b{font-size:13px;font-weight:600;color:#fff;line-height:1.1}
 .tag .role{font-size:11px;color:#ffd46b;line-height:1.15}
@@ -72,6 +72,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tag .task{font-size:10.5px;color:#cfe6ff;max-width:180px;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
 .tag .bubble{font-size:11px;color:#1d2430;background:#fff;border-radius:8px;padding:2px 7px;margin-bottom:2px;text-shadow:none;box-shadow:0 1px 3px #0005}
 html,body{margin:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%} /* กันเบราว์เซอร์มือถือขยายตัวหนังสือเอง */
 /* work-screen popup (standalone page; the dashboard renders its own when embedded) */
 .screen{position:fixed;inset:0;z-index:30;background:#0b0f1799;display:grid;place-items:center;padding:16px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 .screen-box{width:min(860px,100%);max-height:calc(100vh - 32px);background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;box-shadow:0 30px 80px #0008;overflow:hidden}
@@ -106,6 +107,7 @@ html,body{margin:0}
 :root[data-embed="1"] .clock, :root[data-embed="1"] .info{display:none}
 :root[data-embed="1"] .hint{font-size:11px;bottom:6px;color:#9aa5b5;text-shadow:0 1px 2px #000}
 :root[data-embed="1"] #loading{font-size:13px}
+@media (max-width:560px){ :root[data-embed="1"] .hint{display:none} }
 </style>
 </head>
 <body>
