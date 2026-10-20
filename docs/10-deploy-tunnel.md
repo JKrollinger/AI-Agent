@@ -56,6 +56,7 @@ cloudflared tunnel route dns grock ai.example.com
 ```yaml
 tunnel: grock
 credentials-file: C:\Users\<คุณ>\.cloudflared\<UUID>.json
+logfile: C:\Users\<คุณ>\.cloudflared\cloudflared.log   # ล็อกของ tunnel (service ก็เขียนที่นี่)
 ingress:
   - hostname: ai.example.com
     service: http://127.0.0.1:3789
@@ -68,7 +69,7 @@ ingress:
 cloudflared tunnel run grock
 ```
 
-ให้รันเองตอนเปิดเครื่อง: `cloudflared service install` (ติดตั้งเป็น Windows service) และตั้ง `npm start` ให้รันอัตโนมัติตามข้อ 3.1
+ให้รันเองตอนเปิดเครื่อง: ตั้ง `npm start` ให้รันอัตโนมัติตามข้อ 3.1 และติดตั้ง cloudflared เป็น Windows service ตามข้อ 3.2 (ลำดับนี้สำคัญ)
 
 ### 3.1 ให้ `npm start` รันเองตอนล็อกอิน (Task Scheduler — ไม่ต้องติดตั้งอะไรเพิ่ม)
 
@@ -83,7 +84,21 @@ Unregister-ScheduledTask -TaskName "Grock Agent Server" -Confirm:$false   # ถ�
 
 task ทำงานเฉพาะเมื่อผู้ใช้ล็อกอินแล้ว — ถ้าต้องการให้ขึ้นตั้งแต่บูตโดยไม่ต้องล็อกอิน ให้เปิด Task Scheduler → Properties ของ task → ติ๊ก "Run whether user is logged on or not" แล้วใส่รหัสผ่าน Windows ของคุณเอง (ต้องเป็นบัญชีเดียวกับที่ติดตั้ง Claude Code เพราะ Developer โหมดเรียก `claude` CLI ที่อ่าน credentials จากโปรไฟล์ของคุณ) หรือเปิด auto sign-in ของ Windows
 
-**ชั้นล็อกอินเพิ่ม (แนะนำเมื่อใช้โดเมนจริง):** ใน Cloudflare Zero Trust → Access → Applications เพิ่ม `ai.example.com` แล้วกำหนดให้เฉพาะอีเมลของคุณ/ทีมเข้าได้ (ส่งรหัส OTP ทางอีเมล) คำขอที่ไม่ผ่าน Access จะไม่ถึงเครื่องคุณเลย ส่วนรหัสผ่าน Basic Auth ยังเป็นชั้นที่สอง
+### 3.2 ให้ tunnel รันเองตั้งแต่บูต (Windows service)
+
+`cloudflared service install` ติดตั้ง service ที่รันเป็นบัญชี SYSTEM โดย**ไม่ใส่ `--config`** ให้ service จึงไปหา config ในโปรไฟล์ของ SYSTEM (`C:\Windows\System32\config\systemprofile\.cloudflared\`) ไม่ใช่ของคุณ และไม่เจอ tunnel สคริปต์ `tools/autostart/install-cloudflared-service.ps1` จัดการให้ครบ: ยกสิทธิ์เอง (กด Yes ที่ UAC) → validate `config.yml` → `cloudflared service install` (ถ้ายังไม่มี) → แก้ ImagePath ของ service เป็น `"cloudflared.exe" --config "%USERPROFILE%\.cloudflared\config.yml" tunnel run` → ตั้ง Automatic + รีสตาร์ตเองเมื่อล้ม → Restart-Service
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\autostart\install-cloudflared-service.ps1   # กด Yes ที่ UAC
+Get-Service cloudflared                                               # ต้องเป็น Running
+Get-Content "$env:USERPROFILE\.cloudflared\cloudflared.log" -Tail 20   # ล็อกของ service (ตาม logfile ใน config.yml)
+```
+
+**ลำดับสำคัญ:** ติดตั้ง service (หรือ `cloudflared tunnel run grock`) *หลังจาก* เซิร์ฟเวอร์ Node บนพอร์ต 3789 รันด้วย `.env` ที่มี `AUTH_PASSWORD` และโดเมนใน `ALLOWED_HOSTS` แล้วเท่านั้น — tunnel ส่งทุกคำขอจากโดเมนเข้า `127.0.0.1:3789` ทันทีที่ต่อได้ ถ้าเซิร์ฟเวอร์ยังเป็นโค้ด/ค่าเก่าที่ไม่ถามรหัส แดชบอร์ดจะเปิดสาธารณะ ขั้นตอนที่ปลอดภัย: หยุด `npm start` เดิม → เปิดใหม่ (`schtasks /Run /TN "Grock Agent Server"` หรือ `npm start`) → ดูบรรทัด `🔒 ต้องใส่รหัสผ่าน … เปิดรับโดเมน: …` → ค่อยติดตั้ง service
+
+ข้อควรระวัง: `cloudflared tunnel run --url http://127.0.0.1:XXXX grock` **ไม่** เปลี่ยนปลายทางของ named tunnel ที่มี `ingress` ใน config.yml (cloudflared ใช้ ingress ต่อไป) ถ้าต้องการทดสอบชี้พอร์ตอื่นชั่วคราว ให้เขียน config อีกไฟล์แล้วรัน `cloudflared --config <ไฟล์นั้น> tunnel run grock`
+
+**ชั้นล็อกอินเพิ่ม (แนะนำเมื่อใช้โดเมนจริง — Cloudflare Access ฟรีถึง 50 ผู้ใช้):** คำขอที่ไม่ผ่าน Access จะไม่ถึงเครื่องคุณเลย ส่วนรหัสผ่าน Basic Auth ยังเป็นชั้นที่สอง ขั้นตอน: one.dash.cloudflare.com → เลือกบัญชี (ครั้งแรกต้องตั้งชื่อทีมและเลือกแผน Free) → **Access → Applications → Add an application → Self-hosted** → Application name ตามใจ, Application domain = `ai.example.com` (โดเมนที่ชี้ tunnel) → Session duration เช่น 24 hours → Next → **Add a policy**: Action = Allow, Include → Selector = Emails → ใส่อีเมลของคุณ/ทีม → Next → Save ตั้งแต่นั้นเปิดโดเมนจะเจอหน้า Cloudflare ให้ใส่อีเมล รับรหัส OTP ทางอีเมล แล้วถึงจะเจอกล่องรหัสผ่านของแอป · SSE/`fetch` ของหน้าเว็บใช้คุกกี้ของ Access ได้เอง ไม่ต้องแก้โค้ด · ถ้าใช้ `curl` ต้องสร้าง Service Token (Access → Service Auth) แล้วส่งหัว `CF-Access-Client-Id/Secret`
 
 ## 4. ข้อควรรู้
 
@@ -92,4 +107,6 @@ task ทำงานเฉพาะเมื่อผู้ใช้ล็อก
 - ไฟล์โมเดล 3 มิติ (~40 MB) อยู่ในเครื่องคุณอยู่แล้ว ผู้ใช้ภายนอกโหลดผ่าน tunnel ครั้งแรกอาจช้า 10–30 วินาทีตามอินเทอร์เน็ตขาขึ้นของคุณ
 - SSE (`/api/events`) ผ่าน Cloudflare ได้ปกติ ถ้าหลุดจะต่อใหม่เองและมีหัวใจเต้นทุก 15 วินาที
 - ปุ่ม "⚙ ตั้งค่า AI", Apply/ปฏิเสธ patch และการสั่งงานทำได้จากภายนอก (หลังใส่รหัสผ่าน) — ลงทะเบียนโปรเจกต์ใหม่ต้องทำที่เครื่อง
+- เปิด **Always Use HTTPS** ใน Cloudflare (SSL/TLS → Edge Certificates) เพื่อให้ `http://` เด้งเป็น `https://` อัตโนมัติ — ไม่งั้นรหัสผ่าน Basic Auth อาจถูกส่งผ่าน http ธรรมดาถ้าใครพิมพ์โดเมนโดยไม่ใส่ https
+- รีบูตเครื่อง: service cloudflared ขึ้นเองตั้งแต่บูต ส่วนเซิร์ฟเวอร์ Node ขึ้นเมื่อคุณล็อกอิน (task §3.1) ระหว่างนั้นโดเมนจะตอบ 502 จาก Cloudflare
 - ถ้าเจอ 403 "Host … ไม่ได้รับอนุญาต" = ลืมใส่โดเมนใน `ALLOWED_HOSTS`; 401 = รหัสผ่านไม่ตรงกับ `.env`; 429 = ส่งโจทย์เกินโควตา
