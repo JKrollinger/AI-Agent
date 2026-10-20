@@ -303,7 +303,7 @@ let wi=0;
   if(!(cx===-6&&dz>0)) add(slab(1.6,0.42,0.035,0.015,0.006), M.sage, cx,0.98,dz);
   blob(cx,dz,2.2,2.2,false);
 });
-const deferredPlants=[[-2,-5.1,0],[-2,5.1,1]];
+const deferredPlants=[[-2,-5.1,0],[-1.55,8.45,1]]; // second one stands in the back corner of the manager's room
 // seats are pushed per desk; facing: person at +face side looks toward desk
 
 // ---------- Meeting room (glass box) ----------
@@ -338,6 +338,29 @@ const tvScreen=add(new THREE.PlaneGeometry(1.84,1.04),M.screenOff,0,1.55,0.026,t
 const tvOn=new THREE.MeshBasicMaterial({map:slideTex});
 const meetLight=new THREE.PointLight(lin(0xffd9a8),0.6,7,2); meetLight.position.set(7,2.6,-5.1); scene.add(meetLight);
 const MEET_DOOR={x:3.5,z:-1.0};
+
+// ---------- Manager's room (glass office for the captain, front-centre, door toward the main aisle) ----------
+// The captain's desk (config desks[0]) must lie inside this box; people hand work in by walking through the door to a spot in front of the desk.
+const MG = CFG.managerRoom===false ? null : Object.assign({x0:-2.0,x1:1.6,z0:4.0,z1:8.9,doorX:1.0,doorW:1.1,label:'ห้องผู้จัดการ · Project Manager'}, CFG.managerRoom||{});
+const MGR_DOOR = MG ? {x:MG.doorX, z:MG.z0} : null;
+const mgrVisitSpots=[]; // where visitors stand (in front of the desk, facing the captain) — several so people handing in at once don't overlap
+if(MG){
+  const cx=(MG.x0+MG.x1)/2, cz=(MG.z0+MG.z1)/2, wx=MG.x1-MG.x0, wz=MG.z1-MG.z0, g0=MG.doorX-MG.doorW/2-cx, g1=MG.doorX+MG.doorW/2-cx;
+  glassWall(wx,cx,MG.z0,0,[g0,g1]);                 // front wall with the door gap
+  glassWall(wx,cx,MG.z1,0);                          // back wall
+  glassWall(wz,MG.x0,cz,Math.PI/2); glassWall(wz,MG.x1,cz,Math.PI/2);
+  const mrug=add(new THREE.PlaneGeometry(wx-0.5,wz-0.5), mat(0x7a6a5a,{roughness:1}), cx,0.01,cz, scene,{cast:false}); mrug.rotation.x=-Math.PI/2;
+  // name sign above the door
+  const signTex=tex(canvas(512,96,(g,w,h)=>{ g.fillStyle='#1d2430'; g.fillRect(0,0,w,h); g.fillStyle='#ffd46b'; g.font='600 40px "IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(MG.label,w/2,h/2+2); }));
+  const sign=add(new THREE.PlaneGeometry(1.6,0.3), new THREE.MeshBasicMaterial({map:signTex}), MG.doorX,2.98,MG.z0-0.05, scene,{cast:false}); sign.rotation.y=Math.PI;
+  // low credenza + award shelf along the side wall
+  add(B(0.45,0.75,1.6),M.white, MG.x0+0.3,0.375,cz+1.2); add(B(0.47,0.03,1.62),M.oak, MG.x0+0.3,0.765,cz+1.2);
+  const desk=(CFG.desks||[])[0]||[-0.4,6.6,1]; const vz = desk[1]-1.1*desk[2]; // in front of the desk (the side opposite the captain)
+  [[desk[0],vz,0],[desk[0]-0.85,vz+0.1,0.35],[desk[0]+0.85,vz+0.1,-0.35]].forEach(([x,z,h])=>mgrVisitSpots.push({x,z,h: desk[2]>0 ? h : h+Math.PI}));
+  const mgrLight=new THREE.PointLight(lin(0xfff1dc),0.5,6,2); mgrLight.position.set(cx,2.6,cz); scene.add(mgrLight);
+}
+const inManagerRoom=(x,z)=> !!MG && x>MG.x0 && x<MG.x1 && z>MG.z0 && z<MG.z1;
+const roomDoorFor=(spot)=> spot && inManagerRoom(spot.x,spot.z) ? MGR_DOOR : undefined; // spots inside the glass office are reached through its door
 
 // ---------- Pantry ----------
 add(B(4.0,0.86,0.66),M.white, 8.5,0.43,8.2);
@@ -988,9 +1011,10 @@ function route(w,to,door,prev){
   let fx=from.x, fz=from.z;
   if(prev && prev.via && from.distanceTo(new THREE.Vector3(prev.x,0,prev.z))<0.05){
     [...prev.via].reverse().forEach(p=>pts.push(p)); fx=pts[pts.length-1].x; fz=pts[pts.length-1].z; }
-  const inMeeting = fx>MR.x0 && fz<MR.z1;
+  const inMeeting = fx>MR.x0 && fz<MR.z1, inMgr = inManagerRoom(fx,fz);
   const exitX = fx<2.5 ? nearestCrossX(fx) : (inMeeting? MEET_DOOR.x : fx);
   if(inMeeting){ const b={x:fx, z:fz-0.6*Math.cos(w.face)}; pts.push(b,{x:MEET_DOOR.x,z:b.z},MEET_DOOR); }
+  else if(inMgr){ const b={x:fx, z:fz-0.6*Math.cos(w.face)}; pts.push(b,{x:MGR_DOOR.x,z:b.z},MGR_DOOR); } // step back from the desk/spot, walk to the door line, out
   else if(fx<2.5) pts.push({x:exitX,z:fz});
   pts.push({x:exitX,z:AISLE_Z});
   const entryX = to.via ? to.via[0].x : to.x<2.5 ? nearestCrossX(to.x) : (door?door.x:to.x);
@@ -1021,13 +1045,13 @@ function endMeeting(){
   meeting.active=false; meeting.t=60+Math.random()*60;
   workers.forEach(w=>{ if(w.goLater&&w.goLater.state==='meet'){ taken.delete(w.goLater.spot); w.goLater=null; } });
   workers.filter(w=>w.state==='meet'||(w.after&&w.after.state==='meet'&&w.state==='walk'))
-    .forEach((w,i)=>{ if(w.state==='walk') goTo(w,w.seat,'work'); else w.goLater={spot:w.seat,state:'work',t:i*1.8+Math.random()*1.5}; });
+    .forEach((w,i)=>{ if(w.state==='walk') goTo(w,w.seat,'work',roomDoorFor(w.seat)); else w.goLater={spot:w.seat,state:'work',door:roomDoorFor(w.seat),t:i*1.8+Math.random()*1.5}; });
 }
 // ---------- Director: who goes where ----------
 let MODE = CFG.mode==='live' ? 'live' : 'demo';
 let JOBS_ACTIVE=false; // live: any job planning/running/synthesizing (bridge.js → Office3D.setActivity)
 const PLACES={
-  desk:   w=>({spot:w.seat, state: (MODE==='live' && w.live.status!=='working') ? 'rest' : 'work'}),
+  desk:   w=>({spot:w.seat, state: (MODE==='live' && w.live.status!=='working') ? 'rest' : 'work', door: roomDoorFor(w.seat)}),
   meeting:()=>{ const s=freeSpot(meetSeats); return s&&{spot:s,state:'meet',door:MEET_DOOR}; },
   coffee: ()=>{ const s=freeSpot(coffeeSpots); return s&&{spot:s,state:'coffee'}; },
   printer:()=>{ const s=freeSpot(printSpots); return s&&{spot:s,state:'print'}; },
@@ -1040,8 +1064,9 @@ function sendTo(w,place){
   const p=PLACES[place] && PLACES[place](w); if(!p) return false;
   goTo(w,p.spot,p.state,p.door); return true;
 }
-// a spot beside a colleague's desk, facing them
+// a spot beside a colleague's desk, facing them — or, for someone sitting in the manager's room, a free spot in front of that desk
 function visitSpotFor(w,tw){
+  if(inManagerRoom(tw.seat.x,tw.seat.z) && mgrVisitSpots.length) return freeSpot(mgrVisitSpots) || mgrVisitSpots[0];
   const base=tw.seat, side=(w.id<tw.id?1:-1);
   return {x:base.x+0.8*side, z:base.z, h:Math.atan2(-side,0)};
 }
@@ -1050,7 +1075,7 @@ function runCommand(w,c){
     const tw=byId(c.target); if(!tw||tw===w) return false;
     const atDesk=st=>st==='work'||st==='rest';
     if(!(atDesk(tw.state) || (tw.state==='walk' && tw.after && atDesk(tw.after.state)))) return false; // they're away: skip the walk
-    w.visitT=c.secs||4; w.visitWith=tw.agentId; goTo(w,visitSpotFor(w,tw),'visit'); return true;
+    w.visitT=c.secs||4; w.visitWith=tw.agentId; const vs=visitSpotFor(w,tw); goTo(w,vs,'visit',roomDoorFor(vs)); return true;
   }
   if(c.type==='go'){ return sendTo(w,c.place); }
   return false;
@@ -1084,7 +1109,7 @@ function decide(w){
     else if(r<0.52){ const s=freeSpot(loungeSpots); if(s){goTo(w,s,'lounge'); return;} }
     else if(r<0.62){ const s=freeSpot(phoneSpots); if(s){goTo(w,s,'phone'); return;} }
     w.timer=15+Math.random()*20; w.timerTotal=w.timer;
-  } else if(w.state!=='meet') goTo(w,w.seat,'work');
+  } else if(w.state!=='meet') goTo(w,w.seat,'work',roomDoorFor(w.seat));
 }
 
 // ---------- Simulation ----------
@@ -1354,7 +1379,7 @@ function screenFor(w){
 function kick(w){
   if(w.state!=='walk'){ if(!w.goLater) w.timer=0; return; }
   // got a task while heading for a break: turn round and go back to the desk
-  if(MODE==='live' && w.live.status==='working' && !w.pin && !w.queue.length && w.after && !['work','visit','meet'].includes(w.after.state)) goTo(w,w.seat,'work');
+  if(MODE==='live' && w.live.status==='working' && !w.pin && !w.queue.length && w.after && !['work','visit','meet'].includes(w.after.state)) goTo(w,w.seat,'work',roomDoorFor(w.seat));
 }
 const modeEl=document.getElementById('mode'), modeText=document.getElementById('mode-text');
 const Office3D={

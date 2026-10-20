@@ -37,7 +37,12 @@ window.OFFICE3D_CONFIG = {
 
   // Desk positions [x, z, facing] in metres, one per team member, same order as `team`.
   // facing 1 = person sits on the +z side, -1 = on the -z side. The floor runs x -13..13, z -9..9.
-  desks: [[-10, -4.7, 1], [-10, -5.5, -1], [-6, -4.7, 1], [-6, -5.5, -1], [-10, 4.7, -1], [-10, 5.5, 1], [-6, 4.7, -1]],
+  // desks[0] (the captain) sits inside the manager's room below; the other six are the open-plan desks on the left.
+  desks: [[-0.4, 6.6, 1], [-10, -5.5, -1], [-6, -4.7, 1], [-6, -5.5, -1], [-10, 4.7, -1], [-10, 5.5, 1], [-6, 4.7, -1]],
+
+  // Glass office for the captain (front-centre, door toward the main aisle). People hand work in by walking through the door
+  // to a spot in front of the desk. false = no room (captain at an open desk). x0/x1/z0/z1 = walls, doorX = door centre on the z0 wall.
+  managerRoom: { x0: -2.0, x1: 1.6, z0: 4.0, z1: 8.9, doorX: 1.0, doorW: 1.1, label: "ห้องผู้จัดการ · Project Manager" },
 
   // Live mode: chance of a short break each time an idle agent re-thinks (every 15–30 s).
   // Breaks happen only when the person has no task AND (idleBreaksOnlyWhenTeamIdle) no job is planning/running/synthesizing —
