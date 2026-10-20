@@ -10,11 +10,13 @@ window.OFFICE3D_CONFIG = {
   modelBase: "models/",         // where the converted Mixamo files live (see tools/office3d/)
 
   // One entry per agent. `id` must match the agent id in server/agents.js (DEFAULT_TEAM).
-  // Order = desk order (see `desks`). `look` is used for the built-in figure while/if the model can't load.
+  // Order = desk order (see `desks`). `model.file` picks the 3D character (any file in models/, swap between people freely);
+  // `look` is used for the built-in figure while/if the model can't load.
   team: [
+    // ชุดตัวละคร (model.file + look) สลับระหว่างคนได้ตามใจ — 20 ต.ค. 2026 สลับชุดของผู้จัดการโครงการกับนักพัฒนาตามที่ผู้ใช้ขอ
     { id: "captain", jobId: "lord-knight", name: "ผู้จัดการโครงการ", role: "Project Manager",
-      model: { file: "lord-knight.json", height: 1.78 },
-      look: { skin: 0xe8b896, shirt: 0xf2f0ea, jacket: 0x7a1f1f, pants: 0x23262d, hair: 0x3b2a1e, style: 0, iris: 0x3b2618, shoe: 0x1b1b1d } },
+      model: { file: "whitesmith.json", height: 1.78 },
+      look: { skin: 0xe8b896, shirt: 0xf2f2ef, pants: 0xa37f5a, hair: 0xd9a8a0, style: 4, iris: 0x8a4a3a, sleeves: "short", shoe: 0xf0eeea } },
     { id: "qa-1", jobId: "high-priest", name: "ผู้ตรวจคุณภาพ", role: "Quality & Compliance",
       model: { file: "high-priest.json", height: 1.66 },
       look: { skin: 0xf1c9a5, shirt: 0xf4f1ea, jacket: 0xe3cfd6, pants: 0x8a7d86, hair: 0xd9a066, style: 1, iris: 0x4f7aa3, shoe: 0xd8c8c0 } },
@@ -31,8 +33,8 @@ window.OFFICE3D_CONFIG = {
       model: { file: "professor.json", height: 1.68, phoneWalk: true },
       look: { skin: 0xf1c9a5, shirt: 0xe6e0d4, jacket: 0x8a6e52, pants: 0x5a4636, hair: 0xf0c27a, style: 1, iris: 0x4a6a3a, glasses: true, shoe: 0x6b4a32 } },
     { id: "dev-1", jobId: "whitesmith", name: "นักพัฒนา", role: "Developer & Automation",
-      model: { file: "whitesmith.json", height: 1.78 },
-      look: { skin: 0xe8b896, shirt: 0xf2f2ef, pants: 0xa37f5a, hair: 0xd9a8a0, style: 4, iris: 0x8a4a3a, sleeves: "short", shoe: 0xf0eeea } },
+      model: { file: "lord-knight.json", height: 1.78 },
+      look: { skin: 0xe8b896, shirt: 0xf2f0ea, jacket: 0x7a1f1f, pants: 0x23262d, hair: 0x3b2a1e, style: 0, iris: 0x3b2618, shoe: 0x1b1b1d } },
   ],
 
   // Desk positions [x, z, facing] in metres, one per team member, same order as `team`.
