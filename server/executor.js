@@ -325,17 +325,46 @@ export function validateExternalPlan(plan, roster = rosterFor()) {
   });
 }
 
-async function simPlan(job, onPhase, signal, roster = rosterFor()) {
-  const goal = job.goal;
-  const wantsCode = /โค้ด|code|แอป|app|เว็บ|web|ระบบ|api|สคริปต์|script|โปรแกรม|bot|บอท|dashboard|แดชบอร์ด|automation|อัตโนมัติ/i.test(goal);
-  for (const phase of ["กำลังอ่านโจทย์", "กำลังแตกงานย่อย", "กำลังจัดลำดับและมอบหมาย"]) {
-    onPhase?.(phase);
-    await sleep(rand(600, 1100) / speed(), signal);
-  }
+/**
+ * แม่แบบงานจำลองต่อตำแหน่ง (goal = โจทย์เต็ม, s = โจทย์ย่อ) — ใช้เมื่อโปรเจกต์จำกัด plan.roles
+ * งานแต่ละชิ้นต้อง "ยืนได้เอง" อ้างโจทย์ตรง ๆ เพราะงานวิจัย/การตลาดที่ปกติมาก่อนอาจไม่มีในแผน
+ */
+const SIM_ROLE_TASK = {
+  researcher: (goal, s) => ({ title: `ค้นข้อมูลพื้นฐาน: ${s}`, description: `รวบรวมข้อเท็จจริง นิยาม สถานการณ์ปัจจุบัน สถิติ กฎระเบียบ และแหล่งอ้างอิงเกี่ยวกับ "${goal}"` }),
+  marketer: (goal, s) => ({ title: `วิเคราะห์ตลาดและคู่แข่ง: ${s}`, description: `สำรวจกลุ่มเป้าหมาย คู่แข่ง จุดขาย และแนวทางสื่อสารที่เกี่ยวกับ "${goal}"` }),
+  finance: (goal, s) => ({ title: `วิเคราะห์การเงินและกลยุทธ์: ${s}`, description: `วิเคราะห์ต้นทุน ผลตอบแทน ความเสี่ยง และเปรียบเทียบทางเลือกของ "${goal}" พร้อมสรุปเป็นข้อเสนอสำหรับผู้บริหาร` }),
+  engineer: (goal, s) => ({ title: `ออกแบบโซลูชัน AI: ${s}`, description: `ออกแบบแนวทาง AI/LLM, prompt, การประเมินผล และต้นทุนโทเคนสำหรับ "${goal}"` }),
+  coder: (goal, s) => ({ title: `เขียนโค้ด: ${s}`, description: `แก้ไฟล์ในโปรเจกต์ตามโจทย์ "${goal}" ให้ครบ เปลี่ยนให้น้อยที่สุด พร้อมอธิบายไฟล์ที่แก้และวิธีทดสอบ` }),
+};
+
+/**
+ * รายการงานของกัปตันจำลอง (ไม่มี delay — simPlan ห่อด้วยเฟสหน่วงเวลา): title, description, role, dependsOn, reviewOf (เฉพาะ QA), assignee
+ * - ไม่จำกัดตำแหน่ง → แผนทั่วไป: วิจัย + ตลาด → การเงิน → [AI] → [ต้นแบบ + ตรวจโค้ด] → ข้อเสนอผู้บริหาร → QA
+ * - โปรเจกต์จำกัด plan.roles → สร้างจากแม่แบบของตำแหน่งที่อนุญาต "เท่านั้น" ตามลำดับที่ตั้งไว้ ต่อกันเป็นลำดับ แล้ว QA ปิดท้าย
+ *   (ไม่ใช่สร้างแผนทั่วไปแล้วเปลี่ยน role ทีหลัง ซึ่งทำให้ coder ได้ชื่องาน/คำอธิบายของนักวิจัย → ชื่อไฟล์ patch, การ์ดงาน และ prompt ที่ส่งให้ Claude Code สับสน)
+ */
+export function simPlanTasks(goal, rules = {}, roster = rosterFor()) {
   const s = shorten(goal, 36);
+  const allowed = [...new Set((rules?.allowedRoles || []).filter((r) => SIM_ROLE_TASK[r]))]; // reviewer/ตำแหน่งที่ไม่รู้จักไม่ใช่งานผลิต → ข้าม
+  let tasks;
+  if (allowed.length) {
+    tasks = allowed.map((role, i) => ({ ...SIM_ROLE_TASK[role](goal, s), role, dependsOn: i ? [i - 1] : [] }));
+    const w = tasks.length - 1;
+    tasks.push({ title: `ตรวจคุณภาพ: ${shorten(tasks[w].title, 40)}`, role: "reviewer", dependsOn: [w], reviewOf: w, description: `ตรวจสอบความถูกต้อง ครบถ้วน และความพร้อมใช้งานของ "${tasks[w].title}"` });
+  } else {
+    tasks = simGenericTasks(goal, s);
+  }
+  // กัปตัน (จำลอง) เลือกคนตามหน้าที่ เช่น งานค้นข้อมูลพื้นฐาน → คนที่หน้าที่ระบุ "ค้นข้อมูลพื้นฐาน", งานคู่เทียบ → คนที่หน้าที่ระบุ "คู่เทียบ"
+  const load = new Map();
+  for (const t of tasks) t.assignee = suggestAssignee(t.role, `${t.title} ${t.description}`, roster, load);
+  return tasks;
+}
+
+function simGenericTasks(goal, s) {
+  const wantsCode = /โค้ด|code|แอป|app|เว็บ|web|ระบบ|api|สคริปต์|script|โปรแกรม|bot|บอท|dashboard|แดชบอร์ด|automation|อัตโนมัติ/i.test(goal);
   const wantsAI = /\bai\b|เอไอ|ปัญญาประดิษฐ์|llm|chatbot|แชตบอท|แชทบอท|automation|อัตโนมัติ|model|โมเดล|agent|เอเจนต์/i.test(goal);
   const tasks = [
-    { title: `ค้นข้อมูลพื้นฐาน: ${s}`, role: "researcher", dependsOn: [], description: `รวบรวมข้อเท็จจริง นิยาม สถานการณ์ปัจจุบัน สถิติ กฎระเบียบ และแหล่งอ้างอิงเกี่ยวกับ "${goal}"` },
+    { ...SIM_ROLE_TASK.researcher(goal, s), role: "researcher", dependsOn: [] },
     { title: `วิเคราะห์ตลาดและคู่แข่ง`, role: "marketer", dependsOn: [], description: `สำรวจกลุ่มเป้าหมาย คู่แข่ง จุดขาย และแนวทางสื่อสารที่เกี่ยวกับ "${goal}"` },
     { title: `วิเคราะห์การเงินและกลยุทธ์`, role: "finance", dependsOn: [0, 1], description: `นำข้อมูลวิจัยและการตลาดมาวิเคราะห์ต้นทุน ผลตอบแทน ความเสี่ยง และเปรียบเทียบทางเลือก` },
   ];
@@ -353,13 +382,21 @@ async function simPlan(job, onPhase, signal, roster = rosterFor()) {
   tasks.push({ title: `เรียบเรียงข้อเสนอสำหรับผู้บริหาร`, role: "finance", dependsOn: [...new Set([2, last])], description: `เรียบเรียงผลงานทั้งหมดเป็นเอกสารข้อเสนอสำหรับผู้บริหาร พร้อมบทสรุปและขั้นตอนถัดไป` });
   const w = tasks.length - 1;
   tasks.push({ title: `ตรวจคุณภาพเอกสารข้อเสนอ`, role: "reviewer", dependsOn: [w], reviewOf: w, description: `ตรวจความครบถ้วน ความถูกต้อง การปฏิบัติตามกฎ และความพร้อมส่งมอบของเอกสาร` });
-  // กัปตัน (จำลอง) เลือกคนตามหน้าที่ เช่น งานค้นข้อมูลพื้นฐาน → คนที่หน้าที่ระบุ "ค้นข้อมูลพื้นฐาน", งานคู่เทียบ → คนที่หน้าที่ระบุ "คู่เทียบ"
-  const load = new Map();
-  for (const t of tasks) t.assignee = suggestAssignee(t.role, `${t.title} ${t.description}`, roster, load);
-  return { tasks, usage: { input_tokens: 900, output_tokens: 380 } };
+  return tasks;
 }
 
-/** บังคับกติกาโปรเจกต์กับแผน (ใช้กับแผนจำลองที่ไม่ผ่าน normalizePlan): จำกัดตำแหน่ง + จำนวนงาน แล้วเลือกคนใหม่ */
+async function simPlan(job, onPhase, signal, roster = rosterFor(), rules = {}) {
+  for (const phase of ["กำลังอ่านโจทย์", "กำลังแตกงานย่อย", "กำลังจัดลำดับและมอบหมาย"]) {
+    onPhase?.(phase);
+    await sleep(rand(600, 1100) / speed(), signal);
+  }
+  return { tasks: simPlanTasks(job.goal, rules, roster), usage: { input_tokens: 900, output_tokens: 380 } };
+}
+
+/**
+ * บังคับกติกาโปรเจกต์กับแผน (ใช้กับแผนจำลองที่ไม่ผ่าน normalizePlan): จำกัดตำแหน่ง + จำนวนงาน แล้วเลือกคนใหม่
+ * การย้ายงานไปตำแหน่งแรกที่อนุญาตเป็นตาข่ายนิรภัย (คงชื่อ/คำอธิบายเดิม) — แผนจำลองที่สร้างด้วย simPlanTasks(goal, rules) ใช้ตำแหน่งที่อนุญาตอยู่แล้วจึงไม่ถูกย้าย
+ */
 export function applyPlanRules(tasks, rules = {}, roster = rosterFor()) {
   if (!rules || (!rules.allowedRoles?.length && !rules.maxTasks)) return tasks;
   const allowed = rules.allowedRoles?.length ? rules.allowedRoles : null;
@@ -411,7 +448,7 @@ export async function planJob(job, { project = null, onPhase, signal } = {}) {
     return { tasks, usage: { input_tokens: 0, output_tokens: 0 }, model: cap?.model || CAPTAIN_MODEL, external: true };
   }
   if (!isLive()) {
-    const plan = await simPlan(job, onPhase, signal, roster);
+    const plan = await simPlan(job, onPhase, signal, roster, rules);
     plan.model = cap?.model || CAPTAIN_MODEL;
     plan.tasks = applyPlanRules(plan.tasks, rules, roster);
     if (project) plan.usage.input_tokens += Math.round((project.system.length + project.data.length) / 3); // ให้ต้นทุนจำลองสะท้อนขนาดบริบท

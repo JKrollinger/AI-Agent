@@ -1,4 +1,5 @@
-// test-plan-rules.mjs — maxTasks นับเฉพาะงานผลิต, งานผลิตชิ้นสุดท้ายมี QA เสมอ, ดัชนี dependencies ถูกต้องหลังตัด (ทั้ง live normalizePlan และ sim applyPlanRules)
+// test-plan-rules.mjs — maxTasks นับเฉพาะงานผลิต, งานผลิตชิ้นสุดท้ายมี QA เสมอ, ดัชนี dependencies ถูกต้องหลังตัด (ทั้ง live normalizePlan และ sim applyPlanRules),
+// แผนจำลอง (simPlanTasks) เมื่อโปรเจกต์จำกัด plan.roles ต้องได้ชื่อ/คำอธิบายงานของตำแหน่งนั้นจริง
 import assert from "node:assert/strict";
 process.env.LOG_EVENTS = "0";
 const X = await import(new URL("../../server/executor.js", import.meta.url).href);
@@ -60,6 +61,37 @@ assert.deepEqual(s.map((t) => t.title), ["s0", "s1", "s2", "s3", "qa3", "s5", "q
 assert.equal(s[6].reviewOf, 5);
 assert.equal(X.applyPlanRules(sim, {}), sim, "ไม่มีกติกา → คืนแผนเดิม");
 console.log("✅ applyPlanRules (sim): ตัดงานเกิน + QA ตาม, เติม QA ปิดท้าย, ดัชนีถูกต้อง");
+
+// sim: โปรเจกต์จำกัด plan.roles → simPlanTasks สร้างงานจากแม่แบบของตำแหน่งที่อนุญาตเอง ไม่ใช่แผนทั่วไปที่ถูกเปลี่ยน role ทีหลัง
+// (เดิม roles ["coder"] + maxTasks 1 ได้งาน coder ชื่อ "ค้นข้อมูลพื้นฐาน: …" คำอธิบายของนักวิจัย → ชื่อไฟล์ patch/การ์ดงาน/prompt ที่ส่งให้ Claude Code สับสน)
+{
+  const goal = "เพิ่มฟังก์ชัน add(a, b) ใน src/math.js";
+  const plan = (roles, maxTasks) => X.applyPlanRules(X.simPlanTasks(goal, { allowedRoles: roles }), { allowedRoles: roles, maxTasks });
+  let t = plan(["coder"], 1);
+  assert.equal(producers(t).length, 1); assert.equal(reviewers(t).length, 1); checkIndices(t); assert.ok(lastReviewed(t));
+  assert.equal(t[0].role, "coder");
+  assert.ok(t[0].title.startsWith("เขียนโค้ด:") && !t[0].title.startsWith("ค้นข้อมูลพื้นฐาน"), `title ต้องเป็นของนักพัฒนา: ${t[0].title}`);
+  assert.ok(t[0].description.includes(goal) && t[0].description.includes("แก้ไฟล์") && !t[0].description.includes("รวบรวมข้อเท็จจริง"), `description ต้องเป็นของนักพัฒนา: ${t[0].description}`);
+  assert.ok(t.every((x) => x.assignee), "ทุกงานต้องมีคนรับ");
+  assert.ok(t[1].title.startsWith("ตรวจคุณภาพ: เขียนโค้ด") && t[1].reviewOf === 0 && t[1].description.includes("เขียนโค้ด:"), `QA ปิดท้ายต้องอ้างชื่องานใหม่: ${t[1].title}`);
+  // สองตำแหน่ง → ต่อกันเป็นลำดับตามที่ตั้งใน plan.roles ข้อความตรงตำแหน่งทุกชิ้น
+  t = plan(["marketer", "coder"], 8);
+  assert.deepEqual(t.map((x) => x.role), ["marketer", "coder", "reviewer"]);
+  assert.ok(t[0].title.startsWith("วิเคราะห์ตลาดและคู่แข่ง:") && t[0].description.includes("กลุ่มเป้าหมาย"), t[0].title);
+  assert.ok(t[1].title.startsWith("เขียนโค้ด:") && t[1].description.includes("แก้ไฟล์"), t[1].title);
+  assert.deepEqual(t[1].dependsOn, [0]); assert.equal(t[2].reviewOf, 1); checkIndices(t); assert.ok(lastReviewed(t));
+  // maxTasks ตัดเหลือตำแหน่งแรก → QA ที่ตรวจงานที่ถูกตัดหายไป ระบบเติม QA ให้งานที่เหลือ
+  t = plan(["marketer", "coder"], 1);
+  assert.deepEqual(t.map((x) => x.role), ["marketer", "reviewer"]); assert.ok(t[1].title.includes("วิเคราะห์ตลาด") && t[1].reviewOf === 0, t[1].title); checkIndices(t);
+  // reviewer / ตำแหน่งซ้ำใน plan.roles ไม่นับเป็นงานผลิต
+  assert.deepEqual(producers(X.simPlanTasks(goal, { allowedRoles: ["reviewer", "coder", "coder"] })).map((x) => x.role), ["coder"]);
+  // ไม่จำกัดตำแหน่ง → แผนทั่วไปเดิม (เริ่มด้วยนักวิจัย มีต้นแบบเมื่อโจทย์ต้องการโค้ด QA ปิดท้าย)
+  const g = X.simPlanTasks("ทำ dashboard ยอดขาย");
+  assert.equal(g[0].role, "researcher"); assert.ok(g[0].title.startsWith("ค้นข้อมูลพื้นฐาน:"));
+  assert.ok(g.some((x) => x.role === "coder" && x.title.includes("ต้นแบบ")) && lastReviewed(g) && g.every((x) => x.assignee)); checkIndices(g);
+  assert.deepEqual(X.simPlanTasks("ทำ dashboard ยอดขาย", { allowedRoles: [] }).map((x) => x.title), g.map((x) => x.title), "allowedRoles ว่าง = ไม่จำกัด");
+  console.log("✅ simPlanTasks: plan.roles จำกัด → ชื่อ/คำอธิบายตรงตำแหน่ง (coder ไม่ได้แม่แบบนักวิจัย), ลำดับตาม plan.roles, QA อ้างชื่องานใหม่, ไม่จำกัด = แผนทั่วไป");
+}
 
 // llm.systemBlocks: เลือก breakpoint ตามเครื่องหมาย cache, ลิมิต 3, ttl 1h
 delete process.env.PROMPT_CACHE;

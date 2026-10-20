@@ -74,6 +74,10 @@ try {
   assert.ok(pend, "ต้องมี event task.patch (pending) ของโจทย์ A");
   const tA = pend.data.task;
   assert.equal(tA.role, "coder");
+  // plan.roles ["coder"] + maxTasks 1 → กัปตันจำลองต้องตั้งชื่อ/คำอธิบายงานแบบนักพัฒนา (ไม่ใช่แม่แบบนักวิจัยที่ถูกเปลี่ยน role) และชื่อไฟล์ patch ตามชื่องานนั้น
+  assert.ok(tA.title.startsWith("เขียนโค้ด:") && !tA.title.startsWith("ค้นข้อมูลพื้นฐาน"), `งานของ coder ต้องใช้ชื่อของนักพัฒนา: ${tA.title}`);
+  assert.ok(tA.description.includes("แก้ไฟล์ในโปรเจกต์") && !tA.description.includes("รวบรวมข้อเท็จจริง"), `คำอธิบายต้องเป็นของนักพัฒนา: ${tA.description}`);
+  assert.ok(tA.patch.rel.includes("เขียนโค้ด"), `ชื่อไฟล์ patch ต้องมาจากชื่องานใหม่: ${tA.patch.rel}`);
   assert.equal(tA.assignedTo === null || tA.assignedTo === "dev-1", true);
   assert.equal(tA.status, "done", "งานยัง done เพื่อให้ QA ตรวจต่อ");
   assert.equal(tA.phase, "รออนุมัติ patch");
