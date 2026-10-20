@@ -737,10 +737,10 @@ function renderSettings() {
     ${agents.map((a) => `<tr data-cfg="${a.id}">
       <td><div class="s-head">${avatarHtml(a, 26)}<span class="cfg-names"><input class="cfg-name" type="text" maxlength="40" value="${esc(a.name)}" placeholder="ชื่อที่แสดง" title="ชื่อที่แสดงบนการ์ดงาน แผงรายชื่อ ป้ายในฉาก 3 มิติ และใน prompt ของ AI"><input class="cfg-nick" type="text" maxlength="24" value="${esc(a.nick && a.nick !== a.name ? a.nick : "")}" placeholder="ชื่อเล่น (ไม่บังคับ)"></span></div></td>
       <td class="r-line2">${esc(a.roleLabel)}<div class="r-line2">${esc(a.id)}</div></td>
-      <td><select class="cfg-model">${models.map((m) => `<option value="${m}"${m === a.model ? " selected" : ""}>${m}</option>`).join("")}</select></td>
-      <td><select class="cfg-effort">${EFFORTS.map((e) => `<option value="${e}"${e === (a.effort || "medium") ? " selected" : ""}>${e}</option>`).join("")}</select></td>
-      <td><label class="sw"><input type="checkbox" class="cfg-tools"${a.toolsEnabled === false ? "" : " checked"}${(a.tools || []).length ? "" : " disabled"}> ${(a.tools || []).length ? a.tools.map((n) => toolUi(n).icon).join("") : "—"}</label></td>
-      <td class="r-line2">${fmtK((a.metrics?.inputTokens || 0) + (a.metrics?.outputTokens || 0))} · ${fmtUsd(a.metrics?.costUsd)}</td>
+      <td data-label="โมเดล"><select class="cfg-model">${models.map((m) => `<option value="${m}"${m === a.model ? " selected" : ""}>${m}</option>`).join("")}</select></td>
+      <td data-label="ความลึก"><select class="cfg-effort">${EFFORTS.map((e) => `<option value="${e}"${e === (a.effort || "medium") ? " selected" : ""}>${e}</option>`).join("")}</select></td>
+      <td data-label="เครื่องมือ"><label class="sw"><input type="checkbox" class="cfg-tools"${a.toolsEnabled === false ? "" : " checked"}${(a.tools || []).length ? "" : " disabled"}> ${(a.tools || []).length ? a.tools.map((n) => toolUi(n).icon).join("") : "—"}</label></td>
+      <td class="r-line2" data-label="โทเคน · ต้นทุน">${fmtK((a.metrics?.inputTokens || 0) + (a.metrics?.outputTokens || 0))} · ${fmtUsd(a.metrics?.costUsd)}</td>
       <td><button class="btn small primary cfg-save">บันทึก</button></td>
     </tr>
     <tr class="cfg-duty-row" data-cfg-duty="${a.id}"><td colspan="7">

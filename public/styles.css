@@ -374,6 +374,26 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
   .overlay { padding: 8px; }
   .modal, .modal.screen { width: 100%; max-height: 96vh; }
   .drawer { width: 100vw; }
+  .modal { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  table.cfg td.r-line2, .cfg-duty-label .r-line2 { white-space: normal; }
+  .cfg-duty-label .r-line2 { display: block; }
+  /* ⚙ ตั้งค่า AI: ตารางกว้าง 7 คอลัมน์ → การ์ดต่อคน (ชื่อ/ตำแหน่งเต็มแถว, โมเดล|ความลึก, เครื่องมือ|โทเคน, ปุ่มบันทึก, หน้าที่) */
+  .m-head { flex-wrap: wrap; padding: 12px; gap: 6px; }
+  .m-head h2 { font-size: 15px; }
+  .m-head .r-sub { display: none; }
+  .m-body { padding: 8px 10px 12px; }
+  table.cfg thead { display: none; }
+  table.cfg, table.cfg tbody { display: block; width: 100%; }
+  table.cfg tr[data-cfg] { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; background: var(--card); border: 1px solid var(--line); border-bottom: none; border-radius: 12px 12px 0 0; padding: 10px 10px 4px; margin-top: 10px; }
+  table.cfg tr[data-cfg] td { display: block; padding: 0; border: none; min-width: 0; }
+  table.cfg tr[data-cfg] td:nth-child(1), table.cfg tr[data-cfg] td:nth-child(2), table.cfg tr[data-cfg] td:last-child { grid-column: 1 / -1; }
+  table.cfg td[data-label]::before { content: attr(data-label); display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 3px; }
+  table.cfg select { width: 100%; max-width: 100%; }
+  .cfg-names { flex: 1; min-width: 0; }
+  .cfg-names input { width: 100%; }
+  table.cfg tr[data-cfg] td:last-child .btn { width: 100%; padding: 8px; }
+  table.cfg tr.cfg-duty-row { display: block; }
+  table.cfg tr.cfg-duty-row td { display: block; background: var(--card); border: 1px solid var(--line); border-top: none; border-radius: 0 0 12px 12px; padding: 0 10px 10px; }
 }
 
 /* ---------- Project Pack ---------- */
