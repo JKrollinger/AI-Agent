@@ -1021,7 +1021,10 @@ function useModel(w,gltf,cfg){
   model.scale.setScalar(scale);
   model.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; o.frustumCulled=false; o.userData.w=w; pickables.push(o);
     const ms=Array.isArray(o.material)?o.material:[o.material];
-    ms.forEach(m=>{ if(!m) return; m.envMapIntensity=0.8; if(/hair|lash/i.test(m.name+o.name)){ m.transparent=false; m.alphaTest=0.45; m.side=THREE.DoubleSide; } }); } });
+    ms.forEach(m=>{ if(!m) return; m.envMapIntensity=0.8;
+      if(/hair|lash/i.test(m.name+o.name)){ m.transparent=false; m.alphaTest=0.45; m.side=THREE.DoubleSide; }
+      else if(m.transparent || m.alphaMap){ // some Mixamo bodies (sniper/stalker) share an alpha PNG with the hair and arrive as BLEND → body shows through; make them opaque cut-outs instead
+        m.transparent=false; m.opacity=1; m.alphaTest=0.5; m.depthWrite=true; m.needsUpdate=true; } }); } });
   w.g.add(model); w.pelvis.visible=false;
   w.model=model; w.mixer=new THREE.AnimationMixer(model); w.actions={};
   for(const name in clips){ const a=w.mixer.clipAction(clips[name]);
