@@ -924,7 +924,16 @@ document.addEventListener("click", (e) => {
   if (taskEl && !el.closest(".controls")) return openDrawer("task", taskEl.dataset.task);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.screen) return closeScreen(); closeDrawer(); closeSettings(); } });
+// นาฬิกาบนหัวแดชบอร์ด: เวลาจริงของเครื่องที่เปิดหน้าเว็บ (ชม:นาที:วินาที) + วันที่ไทย (พ.ศ.) อัปเดตทุกวินาที
+function startClock() {
+  const el = $("#clock"); if (!el) return;
+  const tf = new Intl.DateTimeFormat("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const df = new Intl.DateTimeFormat("th-TH", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  const tick = () => { const d = new Date(); el.querySelector("b").textContent = tf.format(d); el.querySelector("small").textContent = df.format(d); };
+  tick(); setInterval(tick, 1000);
+}
 initOffice();
 initPortraits();
+startClock();
 connect();
 requestAnimationFrame(frame);

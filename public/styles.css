@@ -56,6 +56,9 @@ button, input { font-family: inherit; font-size: inherit; }
 .badge.mode.live { color: var(--ok); border-color: rgba(61, 213, 152, 0.5); }
 .badge.conn.on { color: var(--ok); }
 .badge.conn.off { color: var(--bad); }
+.badge.clock { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; color: var(--text); }
+.badge.clock b { font-weight: 700; }
+.badge.clock small { color: var(--muted); font-weight: 500; font-size: 10.5px; }
 
 .jobform { display: flex; gap: 8px; min-width: 0; }
 .jobform input {
@@ -361,6 +364,7 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
   .brand .logo { font-size: 24px; }
   .brand h1 { font-size: 15px; }
   .brand .sub { font-size: 11px; flex-wrap: wrap; white-space: normal; }
+  .badge.clock small { display: none; } /* จอโทรศัพท์: แสดงเฉพาะเวลา */
   .jobform { flex-wrap: wrap; }
   .jobform input { flex: 1 1 100%; padding: 9px 12px; }
   .proj-select { flex: 1 1 auto; max-width: none; min-width: 0; }
