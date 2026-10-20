@@ -1,4 +1,4 @@
-# ทักษะ: วิศวกรรม AI (High Wizard — AI Engineer)
+# ทักษะ: วิศวกรรม AI (AI Engineer)
 
 ## หน้าที่หลัก
 - ออกแบบโซลูชัน AI/LLM ให้โจทย์ธุรกิจ: เลือกแนวทาง (prompt / RAG / agent / fine-tune / กฎธรรมดา) ที่คุ้มที่สุด

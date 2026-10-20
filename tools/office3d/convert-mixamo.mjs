@@ -1,7 +1,7 @@
 // convert-mixamo.mjs — Mixamo FBX folder → public/office3d/models/<name>.json (+ textures)
 //
 //   cd tools/office3d && npm install
-//   node convert-mixamo.mjs ../../public/sprites/png/high-wizard high-wizard
+//   node convert-mixamo.mjs ../../assets/mixamo/high-wizard high-wizard
 //
 // The folder holds one Mixamo character downloaded "With Skin" plus any number of animations.
 // File names decide which scene state each animation plays (see CLIP_NAMES below). Unknown names are skipped.

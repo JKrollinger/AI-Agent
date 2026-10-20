@@ -6,10 +6,10 @@ logs/
 data/
 samples/
 tools/out/
-public/sprites/png/*/
-!public/sprites/png/map/
-public/sprites/png/map/*.png
-public/sprites/png/map/*.jpg
+# ภาพสไปรต์/แผนที่ของฉาก 2D เดิม (เลิกใช้แล้ว แต่ไฟล์ภาพของผู้ใช้ยังอยู่ในเครื่อง)
+public/sprites/
+# ไฟล์ FBX ต้นฉบับจาก Mixamo ก่อนแปลง (ดู docs/09-office3d.md §5)
+assets/mixamo/
 
 # ระบบ/เครื่องมือ
 .claude/

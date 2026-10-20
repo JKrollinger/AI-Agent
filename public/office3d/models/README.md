@@ -9,15 +9,15 @@
 
 ## ไฟล์ที่ต้องมี (ตาม `model.file` ใน `public/office3d/config.js`)
 
-| คน | ไฟล์โมเดล | ภาพพื้นผิว |
+| คน | ไฟล์โมเดล (ชื่อไฟล์คงเดิมตาม jobId) | ภาพพื้นผิว |
 |---|---|---|
-| captain · Lord Knight | `lord-knight.json` | `lk_tex*.jpg` |
-| mkt-1 · Sniper | `sniper.json` | `sn_tex*` |
-| res-1 · Stalker | `stalker.json` | `st_tex*` |
-| eng-1 · High Wizard | `high-wizard.json` | `hw_tex*` |
-| fin-1 · Professor | `professor.json` | `pf_tex*` |
-| dev-1 · Whitesmith | `whitesmith.json` | `ws_tex*` |
-| qa-1 · High Priest | `high-priest.json` | `hp_tex*` |
+| captain · ผู้จัดการโครงการ | `lord-knight.json` | `lk_tex*.jpg` |
+| mkt-1 · นักการตลาด | `sniper.json` | `sn_tex*` |
+| res-1 · นักวิจัย | `stalker.json` | `st_tex*` |
+| eng-1 · วิศวกร AI | `high-wizard.json` | `hw_tex*` |
+| fin-1 · นักวิเคราะห์การเงิน | `professor.json` | `pf_tex*` |
+| dev-1 · นักพัฒนา | `whitesmith.json` | `ws_tex*` |
+| qa-1 · ผู้ตรวจคุณภาพ | `high-priest.json` | `hp_tex*` |
 
 ## วิธีได้ไฟล์
 

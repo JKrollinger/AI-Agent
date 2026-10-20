@@ -39,23 +39,11 @@
 
     <section class="center">
       <section class="stage" id="stage">
-        <canvas id="floor" aria-label="เมืองมอร็อค: แผนผังการทำงานของทีม AI แบบเรียลไทม์"></canvas>
-        <!-- ฉากออฟฟิศ 3 มิติ (public/office3d/) โหลดเมื่อเลือกมุมมอง 3D ครั้งแรก — app.js ตั้ง src และคุยด้วย postMessage -->
-        <iframe id="office3d" class="office3d" title="ออฟฟิศทีม AI 3 มิติ: ตัวละครเคลื่อนไหวตามสถานะงานจริง"></iframe>
+        <!-- ฉากออฟฟิศ 3 มิติ (public/office3d/) คือเวทีเดียวของแดชบอร์ด — คุยกับ app.js ด้วย postMessage (แตะตัวละคร → drawer, แตะจอ → หน้าจอการทำงานจริง) -->
+        <iframe id="office3d" class="office3d" src="office3d/index.html?embed=1&amp;theme=dark" title="ออฟฟิศทีม AI 3 มิติ: ตัวละครเคลื่อนไหวตามสถานะงานจริง"></iframe>
         <div class="stage-overlay">
-          <div class="legend">
-            <span><i class="dot working"></i>กำลังทำงาน = ท่าใช้สกิล + HP bar</span>
-            <span><i class="dot paused"></i>นั่ง = หยุดชั่วคราว</span>
-            <span><i class="dot packet"></i>ม้วนงานบิน = มอบหมาย / ส่งต่อ</span>
-            <span><i class="dot patch"></i>🩹 patch รออนุมัติ = Developer แก้ไฟล์จริง รอคุณกด Apply</span>
-            <span class="hint">คลิกตัวละครเพื่อดูรายละเอียดและควบคุม</span>
-          </div>
           <div class="stage-tools">
-            <div class="view-switch" id="viewSwitch" role="group" aria-label="มุมมองฉาก">
-              <button type="button" data-view="2d" aria-pressed="false" title="เมืองมอร็อคไอโซเมตริก 2 มิติ (สไปรต์พิกเซล)">🏜️ มอร็อค 2D</button>
-              <button type="button" data-view="3d" class="active" aria-pressed="true" title="ออฟฟิศ 3 มิติ (three.js + ตัวละคร Mixamo) — แตะตัวละครเพื่อเปิดรายละเอียด">🏢 ออฟฟิศ 3D</button>
-              <button type="button" id="camReset" class="cam-reset" title="กลับมุมกล้องเริ่มต้น (หรือดับเบิลคลิกพื้นในฉาก) — ลากซ้ายหมุน · ลากขวาเลื่อน · ล้อซูม · คลิกตัวละครซูมเข้าโต๊ะ">⟲ มุมกล้อง</button>
-            </div>
+            <button type="button" id="camReset" class="cam-reset" title="กลับมุมกล้องเริ่มต้น (หรือดับเบิลคลิกพื้นในฉาก) — ลากซ้ายหมุน · ลากขวาเลื่อน · ล้อซูม · คลิกตัวละครซูมเข้าโต๊ะ">⟲ มุมกล้อง</button>
             <div class="speed" id="speedCtl">
               <label for="speedRange">ความเร็วจำลอง <b id="speedVal">1×</b></label>
               <input type="range" id="speedRange" min="0.25" max="6" step="0.25" value="1" />

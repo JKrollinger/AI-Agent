@@ -103,7 +103,7 @@
 ## 4. API สำหรับสั่งงานเอง (`window.Office3D`)
 
 ใช้จาก console ของเบราว์เซอร์ จากสคริปต์ในหน้าเดียวกัน หรือจากหน้าแม่ผ่าน `postMessage` เมื่อฝังใน iframe
-`id` รับได้ทั้ง agent id (`mkt-1`), jobId (`sniper`) หรือชื่อ (`Sniper`)
+`id` รับได้ทั้ง agent id (`mkt-1`), jobId (`sniper` = คีย์ไฟล์โมเดล) หรือชื่อที่แสดง (`นักการตลาด`)
 
 | คำสั่ง | ความหมาย |
 |---|---|
@@ -163,18 +163,18 @@ iframe เชื่อม `/api/events` ของตัวเองอยู่�
 ## 5. เพิ่มหรือเปลี่ยนตัวละคร (Mixamo)
 
 1. เข้า mixamo.com เลือกตัวละคร โหลดท่าแรกแบบ **FBX Binary · With Skin · 30 fps** ท่าที่เหลือโหลดได้ทั้งแบบ With Skin หรือ Without Skin
-   ท่าเดินให้ติ๊ก **In Place** ก่อนโหลด แล้วเก็บไฟล์ทั้งหมดในโฟลเดอร์เดียว เช่น `public/sprites/png/<jobId>/`
+   ท่าเดินให้ติ๊ก **In Place** ก่อนโหลด แล้วเก็บไฟล์ทั้งหมดในโฟลเดอร์เดียว เช่น `assets/mixamo/<jobId>/` (ถูก ignore ใน git)
 2. แปลงไฟล์:
    ```
    cd tools/office3d
    npm install
-   node convert-mixamo.mjs ../../public/sprites/png/<jobId> <jobId>
+   node convert-mixamo.mjs ../../assets/mixamo/<jobId> <jobId>
    ```
    ชื่อไฟล์ท่าเป็นตัวกำหนดว่าใช้ตอนไหน: `Typing` → ทำงาน · `Walking`/`Happy Walk`/`Texting And Walking` → เดิน · `Having A Meeting`/`Sitting Talking`/`Asking Question` → ประชุม · `Sitting Idle` → โซฟา · `Sitting` / `Sitting Drinking` → ย่อตัวนั่ง · `Drinking` → กาแฟ · `Talking On Phone`/`Talking Phone Pacing` → โทรศัพท์ · `Talking` → คุยงาน · `…Idle` → ยืนรอ
    ท่าที่ขาด ระบบใช้ท่าใกล้เคียงแทนเอง (ดู `CLIP_FOR` ใน `office3d.js`)
 3. แก้ `config.js` ให้คนนั้นชี้ไปที่ไฟล์ใหม่: `model: { file: "<jobId>.json", height: 1.75 }` (`height` คือส่วนสูงจริงเป็นเมตร ระบบใช้ปรับขนาดตัวและความสูงตอนนั่ง)
 
-**ไฟล์โมเดลไม่อยู่ใน git** — `public/office3d/models/*` ถูก ignore (ไฟล์ละ 3–6 MB รวม ~40 MB และอยู่ภายใต้เงื่อนไขของ Adobe) เหมือนภาพจากเกมใน `public/sprites/png/` มีแค่ `models/README.md` ที่ตามไปใน git พร้อมตารางชื่อไฟล์ที่ต้องมี
+**ไฟล์โมเดลไม่อยู่ใน git** — `public/office3d/models/*` ถูก ignore (ไฟล์ละ 3–6 MB รวม ~40 MB และอยู่ภายใต้เงื่อนไขของ Adobe) เหมือนไฟล์ FBX ต้นฉบับใน `assets/mixamo/` มีแค่ `models/README.md` ที่ตามไปใน git พร้อมตารางชื่อไฟล์ที่ต้องมี
 เครื่องใหม่ให้คัดลอกโฟลเดอร์ `models/` จากเครื่องเดิมมาวาง หรือแปลงใหม่ตามขั้นตอนข้างบน (ตัวแปลง FBX2glTF ที่โหลดมาอยู่ที่ `tools/office3d/.bin/` ซึ่งถูก ignore เช่นกัน) ส่วน `vendor/` (three.js r128 ~730 KB) อยู่ใน git ตามปกติ
 ถ้าไม่มีไฟล์โมเดล ฉากยังเปิดได้ด้วยตัวละครสำรองที่สร้างในโค้ด (สีตาม `look`) แต่จะมี 404 + warning `Model failed, keeping the built-in figure` ใน console ต่อคน
 

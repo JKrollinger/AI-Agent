@@ -144,24 +144,24 @@ export function toolHintFor(role) {
 }
 
 // ทีมเริ่มต้น — ปรับจำนวน/ชื่อ/ตำแหน่งได้ตามโครงสร้างองค์กรจริง
-// ธีม Ragnarok Hi-class (ดู docs/05-ragnarok-theme.md): name = ชื่ออาชีพที่แสดงเป็นหลัก, nick = ชื่อเล่นไทย,
-// jobId = ชื่อไฟล์สไปรต์ใน public/sprites/, zone = โซนในเมืองมอร็อค (public/morroc-map.js)
+// name = ชื่อตำแหน่งที่แสดงบนหน้าเว็บ/ป้ายในฉาก 3 มิติ (เปลี่ยนได้ตามองค์กร — การมอบหมายใช้ id + role + duties ไม่ใช้ชื่อ), nick = ชื่อเล่น,
+// jobId = คีย์ไฟล์โมเดล 3 มิติใน public/office3d/models/<jobId>.json (คงชื่อเดิมไว้ให้ไฟล์ที่แปลงแล้วใช้ต่อได้)
 // duties = "หน้าที่" ของแต่ละคน (แก้ได้จาก dashboard ⚙ ตั้งค่า AI และถูกบันทึกใน data/team.json)
 // กัปตันใช้หน้าที่นี้ตัดสินใจว่างานชิ้นไหนควรให้ใคร (เมื่อตำแหน่งเดียวกันมีหลายคน) และแต่ละคนเห็นหน้าที่ของตนใน system prompt
 export const DEFAULT_TEAM = [
-  { id: "captain", name: "Lord Knight", nick: "กัปตัน", role: "captain", model: CAPTAIN_MODEL, jobId: "lord-knight", job: "Lord Knight", jobTh: "ลอร์ดไนท์", zone: "plaza",
+  { id: "captain", name: "ผู้จัดการโครงการ", nick: "กัปตัน", role: "captain", model: CAPTAIN_MODEL, jobId: "lord-knight",
     duties: "รับโจทย์จากผู้ใช้ แตกงานให้ตรงหน้าที่ของแต่ละคน จัดลำดับความสำคัญ ติดตามกำหนดส่ง และรวบรวมผลลัพธ์สุดท้ายให้ครบถ้วน" },
-  { id: "mkt-1", name: "Sniper", nick: "ริน", role: "marketer", model: WORKER_MODEL, jobId: "sniper", job: "Sniper", jobTh: "สไนเปอร์", zone: "gate",
+  { id: "mkt-1", name: "นักการตลาด", nick: "ริน", role: "marketer", model: WORKER_MODEL, jobId: "sniper",
     duties: "วิเคราะห์ตลาด กลุ่มเป้าหมาย คู่แข่ง จุดขาย วางแผนการตลาดและช่องทาง ร่างข้อความสื่อสารและเนื้อหาโฆษณา กำหนดตัวชี้วัดการตลาด" },
-  { id: "res-1", name: "Stalker", nick: "ต้น", role: "researcher", model: WORKER_MODEL, jobId: "stalker", job: "Stalker", jobTh: "สตอล์คเกอร์", zone: "gate",
+  { id: "res-1", name: "นักวิจัย", nick: "ต้น", role: "researcher", model: WORKER_MODEL, jobId: "stalker",
     duties: "ค้นข้อมูลพื้นฐาน นิยาม สถานการณ์ปัจจุบัน สถิติ กฎระเบียบ กรณีศึกษา และตรวจสอบข้อเท็จจริงกับแหล่งอ้างอิงที่เชื่อถือได้" },
-  { id: "eng-1", name: "High Wizard", nick: "เอิร์ธ", role: "engineer", model: WORKER_MODEL, jobId: "high-wizard", job: "High Wizard", jobTh: "ไฮวิซาร์ด", zone: "tower",
+  { id: "eng-1", name: "วิศวกร AI", nick: "เอิร์ธ", role: "engineer", model: WORKER_MODEL, jobId: "high-wizard",
     duties: "ออกแบบโซลูชัน AI และ LLM เลือกแนวทาง (prompt, RAG, agent) ออกแบบ prompt และการประเมินผล ประเมินต้นทุนโทเคนและความเสี่ยงของโมเดล" },
-  { id: "fin-1", name: "Professor", nick: "ฟ้า", role: "finance", model: WORKER_MODEL, jobId: "professor", job: "Professor", jobTh: "โปรเฟสเซอร์", zone: "library",
+  { id: "fin-1", name: "นักวิเคราะห์การเงิน", nick: "ฟ้า", role: "finance", model: WORKER_MODEL, jobId: "professor",
     duties: "วิเคราะห์ต้นทุน รายได้ ผลตอบแทน ความเสี่ยง เปรียบเทียบทางเลือกเชิงกลยุทธ์ คำนวณตัวเลข และเรียบเรียงข้อเสนอหรือแผนงานสำหรับผู้บริหาร" },
-  { id: "dev-1", name: "Whitesmith", nick: "โค้ด", role: "coder", model: WORKER_MODEL, jobId: "whitesmith", job: "Whitesmith", jobTh: "ไวท์สมิธ", zone: "forge",
+  { id: "dev-1", name: "นักพัฒนา", nick: "โค้ด", role: "coder", model: WORKER_MODEL, jobId: "whitesmith",
     duties: "เขียนโค้ดต้นแบบ สคริปต์อัตโนมัติ API การเชื่อมต่อระบบ และคู่มือติดตั้ง/ใช้งาน พร้อมทดสอบว่ารันได้จริง" },
-  { id: "qa-1", name: "High Priest", nick: "ครูแก้ว", role: "reviewer", model: REVIEWER_MODEL, jobId: "high-priest", job: "High Priest", jobTh: "ไฮพรีสต์", zone: "temple",
+  { id: "qa-1", name: "ผู้ตรวจคุณภาพ", nick: "ครูแก้ว", role: "reviewer", model: REVIEWER_MODEL, jobId: "high-priest",
     duties: "ตรวจคุณภาพ ความถูกต้อง ความครบถ้วนตามโจทย์ การปฏิบัติตามกฎและนโยบาย ของทุกผลงาน ให้คะแนนและ feedback ที่แก้ได้ทันที" },
 ];
 export const MAX_DUTIES_LENGTH = 600;
@@ -181,10 +181,7 @@ export function makeAgent(def) {
     emoji: role.emoji,
     color: role.color,
     model: def.model,
-    jobId: def.jobId || null,
-    job: def.job || null,
-    jobTh: def.jobTh || "",
-    zone: def.zone || null,
+    jobId: def.jobId || null, // คีย์ไฟล์โมเดล 3 มิติ
     effort: def.effort || (def.role === "coder" ? "high" : "medium"), // ความลึกการคิดในโหมด live
     toolsEnabled: def.toolsEnabled !== false,
     duties: String(def.duties || role.description || "").slice(0, MAX_DUTIES_LENGTH), // หน้าที่ (แก้ได้จาก dashboard)

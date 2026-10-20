@@ -160,38 +160,19 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .cfg-duties:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(245, 185, 66, 0.15); }
 .drawer .duty { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; }
 .stage { position: relative; overflow: hidden; }
-#floor { width: 100%; height: 100%; display: block; cursor: default; }
 .stage-overlay { position: absolute; inset: 0; pointer-events: none; }
-.legend {
-  position: absolute; left: 14px; bottom: 12px; display: flex; gap: 14px; flex-wrap: wrap;
-  color: var(--muted); font-size: 12px; background: rgba(11, 15, 23, 0.6); padding: 6px 10px; border-radius: 8px;
-}
-.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-.legend .dot.idle { background: #5b6880; }
-.legend .dot.working { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-.legend .dot.paused { background: var(--warn); }
-.legend .dot.packet { background: #fff; box-shadow: 0 0 8px #fff; }
-.legend .dot.tool { background: var(--info); box-shadow: 0 0 8px var(--info); }
-.legend .hint { opacity: 0.7; }
 .speed {
   position: absolute; right: 14px; top: 12px; pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
   background: rgba(11, 15, 23, 0.7); padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); font-size: 12px; color: var(--muted);
 }
 .speed input { width: 160px; accent-color: var(--accent); }
-/* มุมขวาบนของเวที: ปุ่มสลับฉาก 2D/3D ซ้อนกับแถบความเร็ว */
+/* มุมขวาบนของเวที: ปุ่มกล้อง + แถบความเร็วจำลอง */
 .stage-tools { position: absolute; right: 14px; top: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: auto; }
 .stage-tools .speed { position: static; }
-.view-switch { display: inline-flex; gap: 2px; padding: 3px; background: rgba(11, 15, 23, 0.7); border: 1px solid var(--line); border-radius: 10px; }
-.view-switch button { padding: 5px 10px; border: none; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-.view-switch button:hover { color: var(--text); }
-.view-switch button.active { background: var(--card-2); color: var(--text); font-weight: 600; }
-.view-switch .cam-reset { display: none; border-left: 1px solid var(--line); border-radius: 0 8px 8px 0; margin-left: 2px; }
-.stage.view-3d .view-switch .cam-reset { display: inline-block; }
-/* ฉากออฟฟิศ 3 มิติ (iframe) ซ้อนบน canvas 2 มิติ — ซ่อนด้วย visibility เพื่อให้ขนาด iframe คงเดิม (ไม่ต้อง resize WebGL ใหม่ตอนสลับกลับ) */
-.stage .office3d { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--bg); visibility: hidden; }
-.stage.view-3d .office3d { visibility: visible; }
-.stage.view-3d #floor { visibility: hidden; }
-.stage.view-3d .legend { display: none; }
+.cam-reset { padding: 5px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(11, 15, 23, 0.7); color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.cam-reset:hover { color: var(--text); }
+/* ฉากออฟฟิศ 3 มิติ (iframe) เต็มเวที */
+.stage .office3d { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
 
 /* ---------- หน้าจอการทำงานจริง (popup ต่อคน) ---------- */
 .modal.screen { width: min(880px, 100%); }
@@ -375,7 +356,6 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .chip.patch.rejected, .chip.patch.superseded { color: var(--muted); background: var(--card-2); border-color: var(--line); }
 .chip.patch.error { color: var(--bad); border-color: rgba(255, 95, 109, 0.4); }
 .tabs .count .pending-badge { color: var(--warn); font-weight: 700; }
-.legend .dot.patch { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .patch-box { border-radius: 10px; padding: 10px 12px; background: var(--card); border: 1px solid rgba(255, 165, 82, 0.35); min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .patch-box .r-line2 { white-space: normal; word-break: break-all; overflow: visible; text-overflow: clip; }
 .patch-box .r-line2 + .r-line2 { display: block; }

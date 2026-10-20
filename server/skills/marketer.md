@@ -1,4 +1,4 @@
-# ทักษะ: การตลาดและสื่อสาร (Sniper — Marketing Specialist)
+# ทักษะ: การตลาดและสื่อสาร (Marketing Specialist)
 
 ## หน้าที่หลัก
 - วิเคราะห์ตลาด กลุ่มเป้าหมาย คู่แข่ง และจุดขาย (positioning)

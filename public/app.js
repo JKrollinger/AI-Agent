@@ -70,7 +70,6 @@ function patchSection(t) {
 // ---------------------------------------------------------------------------
 const S = {
   mode: "sim",
-  view: "3d", // มุมมองฉาก: "3d" ออฟฟิศ (office3d/ ใน iframe, ค่าเริ่มต้น) | "2d" เมืองมอร็อค (scene.js) — จำไว้ใน localStorage
   sceneSel: null, // พนักงานที่ถูกเลือกอยู่ในฉาก 3 มิติ (กันคำสั่ง select ส่งวนไปมาระหว่างหน้าแม่กับ iframe)
   screen: null, // agentId ที่เปิด "หน้าจอการทำงานจริง" อยู่ (popup)
   toolLog: new Map(), // taskId -> [{t, tool, input, result, ok}] จาก task.progress.toolStep (คำค้น/URL/คำสั่ง + ผล)
@@ -135,7 +134,6 @@ function handle(ev) {
       S.tasks = new Map(d.tasks.map((t) => [t.id, t]));
       S.jobs = new Map(d.jobs.map((j) => [j.id, j]));
       S.allowedModels = d.allowedModels || [];
-      layout();
       mark("kpis", "tasks", "metrics", "results", "drawer", "mode", "roster", "strip", "projects");
       break;
     case "log.history":
@@ -156,33 +154,26 @@ function handle(ev) {
       break;
     case "task.review": {
       upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "screen");
-      const who = d.task.assignedTo || lastAgentOf(d.task);
-      if (who) sc().fx(who, d.approved ? "bless" : "fail");
       break;
     }
     case "task.failed": {
       upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
-      const who = lastAgentOf(d.task);
-      if (who) { sc().fx(who, "fail"); sc().emote(who, "question"); }
       if (!d.retry) toast(`❌ งาน "${trunc(d.task.title, 40)}" ล้มเหลว: ${d.error || ""}`, "bad");
       break;
     }
     case "task.assigned":
-      upsertTask(d.task);
-      spawnPacket(d.from || "captain", d.to, trunc(d.task.title, 26), S.agents.get(d.to)?.color || "#fff", d.from && d.from !== "captain" ? "handoff" : "assign");
-      sc().visit(d.to, d.from || "captain"); // ผู้รับเดินไปรับงานจากกัปตัน/เพื่อน แล้วกลับมาทำที่จุดประจำ
+      upsertTask(d.task); // การเดิน/บับเบิลอยู่ในฉาก 3 มิติ (office3d/bridge.js ฟัง SSE เอง)
       mark("tasks", "kpis", "drawer", "strip", "roster");
       break;
     case "task.handoff":
       upsertTask(d.task);
-      if (d.from && d.from !== "captain") sc().emote(d.from, d.manual ? "question" : "angry");
       toast(`🔁 ส่งต่อ "${trunc(d.task.title, 36)}" จาก ${agentName(d.from)} → ${agentName(d.to)}${d.score != null ? ` (QA ${d.score}/100)` : ""}`, "warn");
       mark("tasks", "drawer", "strip");
       break;
     case "task.patch": {
       upsertTask(d.task); mark("tasks", "kpis", "drawer", "strip");
       const t = d.task, n = (t.patch?.files || []).length, who = t.patch?.agentName || agentName(lastAgentOf(t));
-      if (d.action === "pending") { toast(`🩹 ${who} ส่ง patch ${n} ไฟล์ รออนุมัติ: "${trunc(t.title, 36)}" — เปิดการ์ดงานเพื่อ Apply/ปฏิเสธ`, "warn"); const a = lastAgentOf(t); if (a) sc().emote(a, "question"); }
+      if (d.action === "pending") { toast(`🩹 ${who} ส่ง patch ${n} ไฟล์ รออนุมัติ: "${trunc(t.title, 36)}" — เปิดการ์ดงานเพื่อ Apply/ปฏิเสธ`, "warn"); }
       else if (d.action === "applied") toast(`✅ Apply patch "${trunc(t.title, 36)}" เข้าโปรเจกต์แล้ว (${(d.files || []).length} ไฟล์)`, "ok");
       else if (d.action === "rejected") toast(`🚫 ปฏิเสธ patch "${trunc(t.title, 36)}" — ไฟล์ไม่ถูกแตะ`, "warn");
       else if (d.action === "error") toast(`⚠️ Apply patch ไม่สำเร็จ: ${d.error || ""}`, "bad");
@@ -190,9 +181,6 @@ function handle(ev) {
     }
     case "task.completed":
       upsertTask(d.task);
-      spawnPacket(d.from, "captain", "ส่งผลงาน ✓", S.agents.get(d.from)?.color || "#3dd598", "return");
-      sc().visit(d.from, "captain"); // เดินไปส่งผลงานให้กัปตัน แล้วกลับจุดประจำ
-      sc().emote(d.from, "heart");
       mark("tasks", "kpis", "drawer", "strip", "roster", "screen");
       break;
     case "task.progress": {
@@ -210,7 +198,7 @@ function handle(ev) {
       upsertJob(d.job); mark("tasks", "results", "kpis", "strip", "screen");
       break;
     case "job.completed":
-      upsertJob(d.job); burst("captain"); mark("screen");
+      upsertJob(d.job); mark("screen");
       toast(`🎉 งานเสร็จสมบูรณ์: "${trunc(d.job.goal, 50)}" ใช้เวลา ${fmtMs(d.job.durationMs)} ต้นทุน ${fmtUsd(d.job.costUsd)}`, "ok");
       mark("tasks", "results", "kpis", "strip");
       break;
@@ -411,7 +399,7 @@ function closeDrawer() {
   if (S.sceneSel) { S.sceneSel = null; office.send("select", null); } // เอาวงเลือกในฉาก 3 มิติออกด้วย
 }
 /** เปิด drawer ของพนักงานจากแผงรายชื่อ/การ์ด — ถ้าอยู่ในมุมมอง 3 มิติ ให้วงเลือกในฉากตามไปด้วย */
-function focusAgent(id) { openDrawer("agent", id); if (S.view === "3d") { S.sceneSel = id; office.send("select", id); } }
+function focusAgent(id) { openDrawer("agent", id); S.sceneSel = id; office.send("select", id); }
 
 function agentOptions(excludeId) {
   return [...S.agents.values()].filter((a) => a.role !== "captain" && a.id !== excludeId)
@@ -441,7 +429,7 @@ function renderDrawer() {
     const live = S.live.get(a.id) || a.lastOutput || "";
     const mine = [...S.tasks.values()].filter((t) => t.assignedTo === a.id || t.history?.some((h) => h.agentId === a.id)).sort((a2, b2) => b2.createdAt - a2.createdAt).slice(0, 6);
     html = `<div class="d-head"><div class="avatar" style="border-color:${a.color}">${avatarHtml(a, 30)}</div>
-        <div><h2>${esc(a.name)}</h2><div class="role">${esc(a.roleLabel)}${a.jobTh ? ` (${esc(a.jobTh)})` : ""} · ${esc(a.model)}</div></div>
+        <div><h2>${esc(a.name)}</h2><div class="role">${esc(a.roleLabel)}${a.nick && a.nick !== a.name ? ` (${esc(a.nick)})` : ""} · ${esc(a.model)}</div></div>
         <span class="chip ${a.status === "working" ? "running" : a.status === "paused" ? "review" : ""}" style="margin-left:auto">${STATUS_TH[a.status]}</span>
         <button class="btn small ghost" data-screen="${a.id}" title="ข้อความที่สตรีม เครื่องมือที่ใช้ และผลตรวจ QA ของคนนี้">🖥️ หน้าจอการทำงาน</button>
         <button class="close" title="ปิด">×</button></div>
@@ -651,64 +639,27 @@ function renderScreen(force = false) {
 }
 
 // ---------------------------------------------------------------------------
-// ฉากเมืองมอร็อค (scene.js) — ตัวละครสไปรต์พิกเซลอาร์ต + แอนิเมชันเหตุการณ์
+// รูปแทนตัว (อีโมจิประจำตำแหน่ง) ใน roster/การ์ด/drawer — ตัวละครจริงอยู่ในฉาก 3 มิติ
 // ---------------------------------------------------------------------------
-const canvas = $("#floor");
-let scene = null;
-const sc = () => scene || { spawnPacket() {}, emote() {}, fx() {}, burst() {}, layout() {}, setHover() {}, visit() {}, goHome() {}, spriteDataUrl: () => null, jobOf: () => null };
-const avatarCache = new Map(); // jobId -> data URL
-async function initScene() {
-  try {
-    const mod = await import("./scene.js");
-    scene = mod.createScene(canvas, S, {
-      onClick: (id) => (id ? openDrawer("agent", id) : closeDrawer()),
-      onHover: (id) => highlightRoster(id),
-      onSpriteLoaded: (jobId) => { avatarCache.delete(jobId); mark("roster", "strip", "metrics", "drawer"); },
-    });
-    window.__scene = scene; // สำหรับดีบักจาก console (เช่น __scene.visit("res-1", "captain"))
-    scene.ready.then(() => { avatarCache.clear(); scene.layout(); mark("roster", "metrics", "drawer", "tasks", "strip"); });
-    if (S.agents.size) scene.layout();
-  } catch (err) {
-    console.error("โหลดฉากไม่สำเร็จ", err);
-    toast(`โหลดฉากไม่สำเร็จ: ${err.message}`, "bad");
-  }
-}
-const spawnPacket = (...a) => sc().spawnPacket(...a);
-const burst = (id) => sc().burst(id);
-const layout = () => sc().layout();
+const avatarHtml = (a) => `<span class="avatar-emoji">${a.emoji || "👤"}</span>`;
 function frame() { if (dirty.size) flush(); requestAnimationFrame(frame); }
 
 // ---------------------------------------------------------------------------
-// ฉากออฟฟิศ 3 มิติ (public/office3d/ ใน iframe) — สลับกับฉากมอร็อค 2 มิติด้วยปุ่มมุมขวาบนของเวที
+// ฉากออฟฟิศ 3 มิติ (public/office3d/ ใน iframe) — เวทีเดียวของแดชบอร์ด
 // iframe ต่อ /api/events ของตัวเอง จึงไม่ต้องส่งสถานะเข้าไป; คุยกันด้วย postMessage (ดู docs/09-office3d.md §4):
-//   แม่ → ลูก {type:"office3d", cmd, args}   ลูก → แม่ {type:"office3d:ready"|"office3d:select", data}
+//   แม่ → ลูก {type:"office3d", cmd, args}   ลูก → แม่ {type:"office3d:ready"|"office3d:select"|"office3d:screen", data}
 // ---------------------------------------------------------------------------
-const VIEW_KEY = "grock.view";
 const office = {
   frame: $("#office3d"),
   ready: false,
-  src: "office3d/index.html?embed=1&theme=dark", // embed=1 ซ่อนนาฬิกา/การ์ดข้อมูลของหน้าเดี่ยว (แดชบอร์ดแสดงเองใน drawer)
   send(cmd, ...args) { if (this.ready && this.frame?.contentWindow) this.frame.contentWindow.postMessage({ type: "office3d", cmd, args }, location.origin); },
 };
-function setView(view, { save = true } = {}) {
-  view = view === "3d" ? "3d" : "2d";
-  S.view = view;
-  $("#stage").classList.toggle("view-3d", view === "3d");
-  document.querySelectorAll("#viewSwitch button").forEach((b) => { const on = b.dataset.view === view; b.classList.toggle("active", on); b.setAttribute("aria-pressed", on); });
-  if (view === "3d" && office.frame && !office.frame.getAttribute("src")) office.frame.src = office.src; // โหลดฉาก 3 มิติ (โมเดล ~40 MB) เฉพาะเมื่อเลือกครั้งแรก
-  office.send("pause", view !== "3d"); // ซ่อนอยู่ = หยุดแอนิเมชันประหยัด GPU (เหตุการณ์ยังเข้าทาง SSE ของ iframe และเล่นต่อเมื่อสลับกลับ)
-  if (save) try { localStorage.setItem(VIEW_KEY, view); } catch {}
-}
-function initView() {
-  let v = "3d"; // ค่าเริ่มต้น = ออฟฟิศ 3 มิติ (เบราว์เซอร์ที่เคยเลือก 2D ไว้จะได้ 2D ตามที่จำ)
-  try { v = localStorage.getItem(VIEW_KEY) || "3d"; } catch {}
-  setView(v, { save: false });
-  $("#viewSwitch")?.addEventListener("click", (e) => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); });
+function initOffice() {
   $("#camReset")?.addEventListener("click", () => office.send("resetView")); // กลับมุมกล้องเริ่มต้นของฉาก 3 มิติ
   window.addEventListener("message", (e) => {
     if (!office.frame || e.source !== office.frame.contentWindow || e.origin !== location.origin) return; // รับเฉพาะจาก iframe ของเราเอง
     const d = e.data || {};
-    if (d.type === "office3d:ready") { office.ready = true; office.send("pause", S.view !== "3d"); return; }
+    if (d.type === "office3d:ready") { office.ready = true; return; }
     if (d.type === "office3d:screen") { if (d.data?.agentId) openScreen(d.data.agentId); return; } // แตะจอคอมของคนนั้น
     if (d.type === "office3d:select") { // ผู้ใช้แตะตัวละคร (หรือพื้นว่าง = null) ในฉาก 3 มิติ
       const id = d.data?.agentId || null;
@@ -716,17 +667,6 @@ function initView() {
       if (id) { if (S.agents.has(id)) openDrawer("agent", id); } else closeDrawer();
     }
   });
-}
-
-const ZONE_LABEL = { plaza: "ลานกลางเมือง", gate: "ประตูเมือง", tower: "หอเวทมนตร์", library: "ห้องสมุด", forge: "โรงตีเหล็ก", temple: "วิหาร" };
-const JOB_BY_ROLE = { captain: "lord-knight", marketer: "sniper", researcher: "stalker", engineer: "high-wizard", finance: "professor", coder: "whitesmith", reviewer: "high-priest" };
-const jobIdOf = (a) => a.jobId || sc().jobOf(a) || JOB_BY_ROLE[a.role] || "_base";
-/** รูปตัวละคร (data URL จากสไปรต์) ใช้ใน roster/การ์ด/drawer — fallback อีโมจิ */
-function avatarHtml(a, h = 36) {
-  const jobId = jobIdOf(a);
-  let url = avatarCache.get(jobId);
-  if (!url && scene) { url = scene.spriteDataUrl(jobId, "idle", 0, 3); if (url && scene.hasSprite?.(jobId)) avatarCache.set(jobId, url); }
-  return url ? `<img class="avatar-img" src="${url}" style="height:${h}px" alt="">` : `<span class="avatar-emoji">${a.emoji || "👤"}</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -745,7 +685,7 @@ function renderRoster() {
       const task = a.currentTaskId ? S.tasks.get(a.currentTaskId) : null;
       const doneToday = [...S.tasks.values()].filter((t) => t.assignedTo === a.id && t.status === "done" && (t.finishedAt || 0) >= todayMs).length;
       const st = a.status === "working" ? `กำลังทำ ${pct(task?.progress)}` : a.status === "paused" ? "หยุดพัก" : "ว่าง";
-      const zone = ZONE_LABEL[a.zone] || a.roleLabel;
+      const zone = a.roleLabel;
       return `<div class="roster-row ${a.status}" data-agent="${a.id}">
         <div class="r-avatar">${avatarHtml(a, 40)}</div>
         <div class="r-body">
@@ -796,7 +736,7 @@ function renderSettings() {
     <div class="m-body"><table class="cfg"><thead><tr><th>พนักงาน</th><th>อาชีพ · ตำแหน่ง</th><th>โมเดล</th><th>ความลึก</th><th>เครื่องมือ</th><th>โทเคน · ต้นทุน</th><th></th></tr></thead><tbody>
     ${agents.map((a) => `<tr data-cfg="${a.id}">
       <td><div class="s-head">${avatarHtml(a, 26)}<b>${esc(a.name)}</b></div></td>
-      <td class="r-line2">${esc(a.jobTh || "")} · ${esc(a.roleLabel)}</td>
+      <td class="r-line2">${esc(a.nick && a.nick !== a.name ? a.nick + " · " : "")}${esc(a.roleLabel)}</td>
       <td><select class="cfg-model">${models.map((m) => `<option value="${m}"${m === a.model ? " selected" : ""}>${m}</option>`).join("")}</select></td>
       <td><select class="cfg-effort">${EFFORTS.map((e) => `<option value="${e}"${e === (a.effort || "medium") ? " selected" : ""}>${e}</option>`).join("")}</select></td>
       <td><label class="sw"><input type="checkbox" class="cfg-tools"${a.toolsEnabled === false ? "" : " checked"}${(a.tools || []).length ? "" : " disabled"}> ${(a.tools || []).length ? a.tools.map((n) => toolUi(n).icon).join("") : "—"}</label></td>
@@ -895,10 +835,6 @@ document.addEventListener("click", (e) => {
   if (taskEl && !el.closest(".controls")) return openDrawer("task", taskEl.dataset.task);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.screen) return closeScreen(); closeDrawer(); closeSettings(); } });
-$("#roster").addEventListener("mouseover", (e) => { const r = e.target.closest(".roster-row"); if (r) sc().setHover(r.dataset.agent); });
-$("#roster").addEventListener("mouseleave", () => sc().setHover(null));
-
-initScene();
-initView();
+initOffice();
 connect();
 requestAnimationFrame(frame);
