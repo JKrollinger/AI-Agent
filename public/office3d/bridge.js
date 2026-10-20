@@ -86,7 +86,7 @@
     const t = a.currentTaskId && store.tasks.get(a.currentTaskId);
     return {
       status: a.status,                                   // idle | working | paused (the only source of "what pose")
-      name: a.name, role: a.roleLabel,
+      name: a.name, nick: a.nick && a.nick !== a.name ? a.nick : "", role: a.roleLabel, // ชื่อเล่น (ถ้าตั้ง) ขึ้นตัวหนาบนป้ายเหนือหัว
       task: a.currentTaskTitle || (t && t.title) || "",
       phase: a.phase || (t && t.phase) || "",
       progress: t ? t.progress || 0 : a.status === "working" ? 0 : undefined,

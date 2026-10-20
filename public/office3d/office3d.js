@@ -998,8 +998,10 @@ function updateTags(t){
     o.el.style.display='';
     const x=(tagV.x*0.5+0.5)*r.width, y=(-tagV.y*0.5+0.5)*r.height;
     o.el.style.transform=`translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%) scale(${ts})`;
-    if(o.nameEl.textContent!==w.name) o.nameEl.textContent=w.name;
-    if(o.roleEl.textContent!==w.role) o.roleEl.textContent=w.role;
+    // ป้ายเหนือหัว: ตั้งชื่อเล่นไว้ → ชื่อเล่นตัวหนา บรรทัดล่าง = ชื่อที่แสดง · ไม่ตั้ง → ชื่อที่แสดง + ตำแหน่ง
+    const hasNick = !!(w.nick && w.nick!==w.name), nm = hasNick ? w.nick : w.name, rl = hasNick ? w.name : w.role;
+    if(o.nameEl.textContent!==nm) o.nameEl.textContent=nm;
+    if(o.roleEl.textContent!==rl) o.roleEl.textContent=rl;
     if(w.bubbleT>0){ w.bubbleT-=1/60; o.bubble.hidden=false; if(o.bubble.textContent!==w.bubbleText) o.bubble.textContent=w.bubbleText; } else o.bubble.hidden=true;
     if(MODE==='live' && !w.npc){
       const L=w.live, working=L.status==='working';
@@ -1604,12 +1606,12 @@ const Office3D={
   getMode(){ return MODE; },
   /** connection label shown in the panel: 'live' | 'reconnecting' | 'demo' (+ optional text) */
   setConnection(state,text){ modeEl.dataset.state=state; if(text) modeText.textContent=text; },
-  /** update one agent: {status:'idle'|'working'|'paused', name, role, task, progress(0..1), phase, tool, stats:{done,cost}} */
+  /** update one agent: {status:'idle'|'working'|'paused', name, nick, role, task, progress(0..1), phase, tool, stats:{done,cost}} — nick (ถ้ามี) เป็นตัวหนาบนป้าย, name เลื่อนลงบรรทัดล่าง */
   setAgent(id,patch={}){
     const w=byId(id); if(!w) return false;
     const before=w.live.status;
     for(const k of ['status','task','progress','phase','tool','stats','attempts','toolCalls']) if(k in patch && patch[k]!==undefined) w.live[k]=patch[k];
-    if(patch.name) w.name=patch.name; if(patch.role) w.role=patch.role;
+    if(patch.name) w.name=patch.name; if(patch.role) w.role=patch.role; if('nick' in patch && patch.nick!==undefined) w.nick=String(patch.nick||'');
     if(MODE==='live' && w.live.status!==before) kick(w);
     return true;
   },

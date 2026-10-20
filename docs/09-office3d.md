@@ -111,7 +111,7 @@
 | คำสั่ง | ความหมาย |
 |---|---|
 | `setMode('live' \| 'demo')` | live = ทำตามสถานะจริง, demo = เดินเล่นเอง |
-| `setAgent(id, {status, task, progress, phase, tool, attempts, toolCalls, name, role, stats:{done,cost}})` | อัปเดตสถานะหนึ่งคน (`progress` 0–1; `attempts` ขึ้น "รอบ N" บนป้าย; `tool` เลือกท่านั่ง) |
+| `setAgent(id, {status, task, progress, phase, tool, attempts, toolCalls, name, role, stats:{done,cost}})` | อัปเดตสถานะหนึ่งคน (`progress` 0–1; `attempts` ขึ้น "รอบ N" บนป้าย; `tool` เลือกท่านั่ง) | — `nick` (ชื่อเล่นจาก ⚙ ตั้งค่า AI) ถ้าตั้งไว้จะเป็นตัวหนาบนป้ายเหนือหัว และชื่อที่แสดงเลื่อนลงบรรทัดล่างแทนตำแหน่ง
 | `pin(id, {id, title, attempts, from})` / `unpin(id, noteId)` / `boardNotes(id)` | กระดาษงานบนบอร์ดประจำโต๊ะของคนนั้น (`bridge.js` ใช้กับ task.assigned/completed/handoff/failed/cancelled และ snapshot) |
 | `visit(fromId, toId, secs=4, say=null, pin=null)` | เดินไปที่โต๊ะอีกคน (เข้าห้องผู้จัดการทางประตูถ้าเป็นกัปตัน) คุย `secs` วินาที พูด `say` เมื่อได้พบ แล้วกลับไปทำต่อ — ถ้าอีกคนไม่อยู่โต๊ะ จะรอที่โต๊ะตัวเองแล้วลองใหม่ทุก 1.5 วิ (สูงสุด 90 วิ); กัปตันที่รู้ว่ามีคนรอจะกลับโต๊ะมารับก่อน |
 | `goTo(id, place)` | ส่งไปที่ `desk` · `meeting` · `coffee` · `printer` · `lounge` · `phone` |
