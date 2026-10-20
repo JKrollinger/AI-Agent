@@ -130,7 +130,13 @@ npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิ�
 
 คำขอจากภายนอกลงทะเบียนโปรเจกต์ใหม่ไม่ได้ (ทำที่เครื่องเท่านั้น) ใช้โดเมนของตัวเอง, รันเป็น Windows service, เพิ่มชั้นล็อกอิน Cloudflare Access และข้อควรระวัง: [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md)
 
+## สั่งงานทาง Telegram ผ่าน Hermes Agent
+
+ให้ [Hermes Agent](https://github.com/NousResearch/hermes-agent) เป็น "ผู้จัดการใหญ่": คุณสั่งใน Telegram → Hermes ส่งโจทย์ (พร้อมแผนก็ได้) เข้าศูนย์ควบคุมผ่าน MCP server (`npm run mcp`, `tools/mcp-server.mjs`) ด้วยโทเคนสิทธิ์จำกัด (`API_TOKENS=hermes:โทเคน:jobs`) → ทีมทำงาน กัปตันเลือกคน/QA/รวมผล → โจทย์เสร็จแล้วศูนย์ควบคุมยิง webhook (`JOB_WEBHOOK_URL`, ลายเซ็น HMAC `WEBHOOK_SECRET`) กลับ Hermes → สรุปเข้า Telegram งบรายวันต่อโทเคน `TOKEN_DAILY_USD` (ค่าเริ่มต้น $5) ไม่ใช้ Hermes ก็มี `npm run telegram` (บอทต่อตรง) ขั้นตอนทั้งหมด: [docs/11-hermes.md](docs/11-hermes.md)
+
 ## REST API (ใช้ต่อกับระบบอื่นได้)
+
+การยืนยันตัว: HTTP Basic Auth (`AUTH_USER`/`AUTH_PASSWORD`) หรือ `Authorization: Bearer <โทเคน>` จาก `API_TOKENS=ชื่อ:โทเคน:สิทธิ์` (สิทธิ์ `jobs` = สั่ง/ดูโจทย์ + `/api/state` `/api/projects` `/api/projects/:id/context` `/api/agents` เท่านั้น, `admin` = ทุกอย่าง; บังคับแม้เรียกจาก localhost)
 
 | Method | Path | ใช้ทำอะไร |
 |---|---|---|
@@ -138,7 +144,10 @@ npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิ�
 | GET | `/api/events` | SSE stream เหตุการณ์สด |
 | GET | `/api/logs?limit=200` | บันทึกย้อนหลัง |
 | GET | `/api/health` | สถานะเซิร์ฟเวอร์/โหมด |
-| POST | `/api/jobs` `{goal, project?, files?}` | มอบหมายโจทย์ใหม่ (ตอบ 202 ทันที กัปตันวางแผนต่อเบื้องหลัง; `project` = id ของ Project Pack) |
+| POST | `/api/jobs` `{goal, project?, files?, plan?, requestedBy?, webhookUrl?}` | มอบหมายโจทย์ใหม่ (ตอบ 202 ทันที กัปตันวางแผนต่อเบื้องหลัง; `project` = id ของ Project Pack; `plan` = แผนจากภายนอก ≤ 12 งาน `[{title, role\|agentId, brief, dependsOn?}]` กัปตันใช้แทนวางแผนเองแต่ยังเติม QA/เลือกคน; `requestedBy` แสดงบนการ์ด; `webhookUrl` ปลายทางแจ้งผลเฉพาะโจทย์ — host ต้องอยู่ใน `WEBHOOK_ALLOWED_HOSTS`) · เกินงบรายวันของโทเคน → 429 |
+| GET | `/api/jobs?limit=50&status=done` | รายการโจทย์ล่าสุด (ไม่รวมผลลัพธ์เต็ม) |
+| GET | `/api/agents` | รายชื่อทีม + ตำแหน่ง + หน้าที่ + สถานะ (เลือก `role`/`agentId` ตอนส่งแผน) |
+| — | webhook ขาออก | โจทย์เสร็จ/ล้มเหลว → POST `{jobId, status, goal, project, summary, resultPath, costUsd, durationSec, requestedBy, …}` ไป `JOB_WEBHOOK_URL` หัว `X-Grock-Signature: sha256=<HMAC>` (+ `X-Webhook-Signature-V2` แบบ Hermes) ลองใหม่ 3 ครั้ง — [docs/11](docs/11-hermes.md) |
 | POST | `/api/demo` | มอบหมายโจทย์ตัวอย่าง |
 | POST | `/api/tasks/:id/handoff` `{agentId, reason}` | ส่งต่องาน |
 | POST | `/api/tasks/:id/retry` · `/cancel` | ทำใหม่ / ยกเลิก |
@@ -156,8 +165,8 @@ npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิ�
 ## โครงสร้างโปรเจกต์
 
 ```
-server/   orchestrator (กัปตัน), executor (sim/live), llm (Anthropic SDK), projects (Project Pack), apply (Developer แก้ไฟล์จริง + ด่านอนุมัติ), metrics, bus, state, index (HTTP+SSE)
-tools/    grock.mjs (CLI), tests/ (npm test: unit + e2e โหมด sim)
+server/   orchestrator (กัปตัน), executor (sim/live), llm (Anthropic SDK), projects (Project Pack), apply (Developer แก้ไฟล์จริง + ด่านอนุมัติ), tokens (โทเคน Bearer + งบรายวัน), webhook (แจ้งผลขาออก), metrics, bus, state, index (HTTP+SSE)
+tools/    grock.mjs (CLI), mcp-server.mjs (MCP stdio สำหรับ Hermes/Claude Code), telegram-bot.mjs (บอท Telegram ต่อตรง), tests/ (npm test: unit + e2e โหมด sim)
 public/   index.html, styles.css, app.js (แดชบอร์ด + แผงควบคุม), office3d/ (ฉากออฟฟิศ 3 มิติ: office3d.js, bridge.js, workscreen.js, config.js)
 docs/     01-grok-architecture.md (Grok ทำงานอย่างไร), 02-multi-agent-design.md (ออกแบบระบบนี้และแนวทางขยาย)
 logs/     events.jsonl (สร้างอัตโนมัติ)
@@ -170,3 +179,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
 - [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo
 - [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md) — เปิดใช้งานจากอินเทอร์เน็ตด้วย Cloudflare Tunnel: รหัสผ่าน, `ALLOWED_HOSTS`, quick/named tunnel, Windows service, Cloudflare Access
+- [docs/11-hermes.md](docs/11-hermes.md) — สั่งงานทาง Telegram ผ่าน Hermes Agent: โทเคนสิทธิ์จำกัด + งบรายวัน, แผนจากภายนอก, webhook แจ้งผล + ลายเซ็น, MCP server, ตั้งค่า Hermes (Telegram gateway, MCP, webhook route, cron), บอท Telegram ต่อตรง

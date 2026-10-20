@@ -37,7 +37,7 @@ export const captain = () => state.agents.get("captain");
  * สร้าง Task ใหม่
  * status: queued | assigned | running | review | done | failed | cancelled
  */
-export function createTask({ jobId, seq, title, description, role, dependsOn = [], preferredAgentId = null }) {
+export function createTask({ jobId, seq, title, description, role, dependsOn = [], preferredAgentId = null, note = "สร้างงานโดยกัปตัน" }) {
   const task = {
     id: uid("task"),
     jobId,
@@ -66,19 +66,27 @@ export function createTask({ jobId, seq, title, description, role, dependsOn = [
     activeTool: null, // เครื่องมือที่กำลังใช้อยู่ตอนนี้ เช่น web_search (null = ไม่ได้ใช้)
     patch: null, // patch ล่าสุดของงานแก้ไฟล์จริง { rel, status: pending|applied|rejected|superseded|error, files, rejected, preview, ... } (apply.js)
     patches: [], // ประวัติ patch ทุกรอบของงานนี้ (audit)
-    history: [{ t: Date.now(), type: "created", note: "สร้างงานโดยกัปตัน" }],
+    history: [{ t: Date.now(), type: "created", note }],
   };
   state.tasks.set(task.id, task);
   return task;
 }
 
-export function createJob(goal, { project = null, files = [] } = {}) {
+export function createJob(goal, { project = null, files = [], source = "local", sourceKind = "local", requestedBy = "", webhookUrl = null, plan = null } = {}) {
   const job = {
     id: uid("job"),
     goal,
     project, // id ของโปรเจกต์ (Project Pack) ที่งานนี้ทำให้ หรือ null
     files, // ไฟล์ในโปรเจกต์ที่ผู้สั่งงานแนบมาให้ทีมอ่าน (path สัมพัทธ์)
     outputDir: null, // โฟลเดอร์ผลงานในโปรเจกต์ (เมื่อมี project)
+    source, // ใครสั่ง: "local" (เครื่องนี้/หน้าเว็บ), ชื่อโทเคน (เช่น "hermes"), "web:<user>" (Basic Auth)
+    sourceKind, // local | token | basic — token = นับเข้างบรายวันของโทเคนนั้น
+    requestedBy, // ข้อความอิสระจากผู้เรียก เช่น "telegram:@somchai" (แสดงบนการ์ดงาน/ผลงาน)
+    webhookUrl, // ปลายทางแจ้งผลเฉพาะโจทย์นี้ (ตรวจ host แล้ว) หรือ null = ใช้ JOB_WEBHOOK_URL
+    webhook: null, // ผลการส่ง webhook { url, status: sending|sent|failed, httpStatus, attempts, error, at }
+    plan, // แผนจากภายนอกที่ตรวจแล้ว (ใช้ตอนวางแผนแล้วล้างทิ้ง)
+    planSource: plan ? "external" : "captain", // ใครวางแผน: กัปตัน หรือผู้ส่งโจทย์
+    error: null, // สาเหตุที่ล้มเหลว (ส่งต่อใน webhook/ผลลัพธ์)
     status: "planning", // planning | running | synthesizing | done | failed
     createdAt: Date.now(),
     finishedAt: null,

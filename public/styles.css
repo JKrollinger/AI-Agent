@@ -400,6 +400,7 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .proj-select { padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); max-width: 190px; }
 .proj-select:focus { outline: none; border-color: var(--accent); }
 .chip.proj { color: var(--accent); background: rgba(245, 185, 66, 0.12); }
+.chip.src { color: var(--info); background: rgba(79, 163, 255, 0.12); } /* ใครสั่ง/ผู้ขอ/แผนจากภายนอก (Hermes, Telegram) */
 .outdir { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); padding: 0 12px 10px; word-break: break-all; }
 
 /* ---------- Patch รออนุมัติ (Developer แก้ไฟล์จริงผ่าน Claude Code headless — apply.js) ---------- */

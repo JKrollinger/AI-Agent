@@ -8,6 +8,8 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --watch --env-file-if-exists=.env server/index.js",
     "grock": "node tools/grock.mjs",
+    "mcp": "node --env-file-if-exists=.env tools/mcp-server.mjs",
+    "telegram": "node --env-file-if-exists=.env tools/telegram-bot.mjs",
     "smoke:live": "node --env-file-if-exists=.env tools/smoke-live.mjs",
     "test": "node tools/tests/run.mjs",
     "tunnel": "cloudflared tunnel --url http://127.0.0.1:3789"

@@ -812,6 +812,11 @@ function jobJson(ctx, job) {
       goal: job.goal,
       project: ctx.pack.id,
       status: job.status,
+      source: job.source || "local", // ใครสั่ง (ชื่อโทเคน เช่น hermes)
+      requestedBy: job.requestedBy || "",
+      planSource: job.planSource || "captain", // captain | external (แผนส่งมากับโจทย์)
+      error: job.error || null,
+      webhook: job.webhook ? { url: job.webhook.url, status: job.webhook.status, httpStatus: job.webhook.httpStatus, attempts: job.webhook.attempts } : null,
       createdAt: fmtTs(job.createdAt),
       finishedAt: job.finishedAt ? fmtTs(job.finishedAt) : null,
       costUsd: job.costUsd || 0,
@@ -847,12 +852,13 @@ function resultMarkdown(ctx, job) {
     `# ผลลัพธ์: ${job.goal}`,
     "",
     `- โปรเจกต์: ${ctx.pack.name} (${ctx.pack.id})`,
-    `- สถานะ: ${job.status === "done" ? "เสร็จสมบูรณ์" : job.status}`,
+    `- สถานะ: ${job.status === "done" ? "เสร็จสมบูรณ์" : job.status}${job.error ? ` — ${job.error}` : ""}`,
+    job.source && job.source !== "local" ? `- สั่งโดย: ${job.source}${job.requestedBy ? ` (${job.requestedBy})` : ""}${job.planSource === "external" ? " · แผนงานส่งมาพร้อมโจทย์" : ""}` : job.requestedBy ? `- ผู้ขอ: ${job.requestedBy}` : null,
     `- เริ่ม: ${fmtTs(job.createdAt)}${job.finishedAt ? ` · จบ: ${fmtTs(job.finishedAt)}` : ""}`,
     `- ต้นทุนรวม: $${(job.costUsd || 0).toFixed(4)}`,
     `- งานย่อย: ${tasks.map((t) => `${t.title} [${t.status}${t.review ? ` QA ${t.review.score}` : ""}]`).join(" · ") || "-"}`,
     "",
-  ].join("\n");
+  ].filter((l) => l !== null).join("\n");
   const body = job.result
     ? job.result
     : `(ยังไม่มีผลสรุปจากกัปตัน — ดูผลงานรายชิ้นใน tasks/)\n\n${tasks.filter((t) => t.status === "done").map((t) => `## ${t.title}\n${t.output}`).join("\n\n")}`;
@@ -875,7 +881,7 @@ export function attachWriter(bus, { agentNameOf = () => "" } = {}) { // agentNam
       } else if (ev.type === "job.planned") {
         const job = d.job; const ctx = getJobContext(job?.id); if (!ctx) return;
         ctx.job = job;
-        writeFileAtomic(path.join(ctx.outDir, "plan.json"), JSON.stringify({ id: job.id, goal: job.goal, tasks: [...ctx.tasks.values()].map((t) => ({ seq: t.seq, title: t.title, role: t.role, description: t.description, dependsOn: t.dependsOn, preferredAgentId: t.preferredAgentId })) }, null, 2) + "\n");
+        writeFileAtomic(path.join(ctx.outDir, "plan.json"), JSON.stringify({ id: job.id, goal: job.goal, planSource: job.planSource || "captain", source: job.source || "local", requestedBy: job.requestedBy || "", tasks: [...ctx.tasks.values()].map((t) => ({ seq: t.seq, title: t.title, role: t.role, description: t.description, dependsOn: t.dependsOn, preferredAgentId: t.preferredAgentId })) }, null, 2) + "\n");
         writeFileAtomic(path.join(ctx.outDir, "job.json"), jobJson(ctx, job));
       } else if (ev.type === "job.completed" || ev.type === "job.failed") {
         const job = d.job; const ctx = getJobContext(job?.id); if (!ctx) return;

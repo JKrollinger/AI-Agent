@@ -205,6 +205,10 @@ function handle(ev) {
     case "job.failed":
       upsertJob(d.job); toast(`❌ งาน "${trunc(d.job.goal, 50)}" ล้มเหลว`, "bad"); mark("tasks", "results", "kpis", "strip");
       break;
+    case "job.webhook": // ผลการส่ง webhook แจ้งผลไปยังระบบภายนอก (Hermes/Telegram)
+      upsertJob(d.job); mark("tasks", "results");
+      if (!d.ok) toast(`📡 ส่ง webhook ของ "${trunc(d.job.goal, 40)}" ไม่สำเร็จ`, "bad");
+      break;
     case "metrics.updated":
       S.totals = d.totals;
       for (const m of d.agents) { const a = S.agents.get(m.id); if (a) { a.metrics = m.metrics; a.computed = m.computed; } }
@@ -306,6 +310,16 @@ function taskCard(t, compact = false) {
   </div>`;
 }
 
+/** ชิปบอกว่าใครสั่งโจทย์ (ระบบภายนอกผ่านโทเคน เช่น hermes), ผู้ขอ (requestedBy เช่น telegram:@user), แผนจากภายนอก, ผลส่ง webhook */
+function originChips(j) {
+  const parts = [];
+  if (j.source && j.source !== "local") parts.push(`<span class="chip src" title="สั่งผ่านโทเคน/บัญชี">🔗 ${esc(j.source)}</span>`);
+  if (j.requestedBy) parts.push(`<span class="chip src" title="ผู้ขอ">👤 ${esc(j.requestedBy)}</span>`);
+  if (j.planSource === "external") parts.push(`<span class="chip src" title="แผนงานถูกส่งมาพร้อมโจทย์ กัปตันตรวจและเติม QA">📋 แผนจากภายนอก</span>`);
+  if (j.webhook) parts.push(`<span class="chip ${j.webhook.status === "sent" ? "done" : j.webhook.status === "failed" ? "failed" : "running"}" title="${esc(j.webhook.url)}${j.webhook.error ? ` — ${esc(j.webhook.error)}` : ""}">📡 ${j.webhook.status === "sent" ? "แจ้งผลแล้ว" : j.webhook.status === "failed" ? "แจ้งผลไม่สำเร็จ" : "กำลังแจ้งผล"}</span>`);
+  return parts.length ? ` · ${parts.join(" ")}` : "";
+}
+
 function renderTasks() {
   const root = $("#tab-tasks");
   const jobs = [...S.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
@@ -321,7 +335,7 @@ function renderTasks() {
     return `<div class="job">
       <div class="job-head" data-job="${j.id}">
         <div style="flex:1;min-width:0"><div class="goal">${esc(j.goal)}</div>
-          <div class="meta">${done}/${tasks.length} งาน · ${dur} · ${fmtUsd(j.costUsd || tasks.reduce((s, t) => s + (t.usage?.costUsd || 0), 0))}${j.project ? ` · <span class="chip proj">📁 ${esc(j.project)}</span>` : ""}</div></div>
+          <div class="meta">${done}/${tasks.length} งาน · ${dur} · ${fmtUsd(j.costUsd || tasks.reduce((s, t) => s + (t.usage?.costUsd || 0), 0))}${j.project ? ` · <span class="chip proj">📁 ${esc(j.project)}</span>` : ""}${originChips(j)}</div></div>
         <span class="chip ${j.status}">${STATUS_TH[j.status] || j.status}</span>
         <span style="color:var(--muted)">${collapsed ? "▸" : "▾"}</span>
       </div>
@@ -382,7 +396,7 @@ function renderResults() {
   $("#tab-results").innerHTML = jobs.length
     ? jobs.map((j) => `<div class="result">
         <div class="head" data-result="${j.id}"><div class="goal">${esc(j.goal)}</div><span class="chip ${j.status}">${STATUS_TH[j.status]}</span></div>
-        <div class="meta" style="padding:0 12px 10px;color:var(--muted);font-size:11px">${fmtMs(j.durationMs)} · ${fmtUsd(j.costUsd)} · ${j.taskIds.length} งานย่อย
+        <div class="meta" style="padding:0 12px 10px;color:var(--muted);font-size:11px">${fmtMs(j.durationMs)} · ${fmtUsd(j.costUsd)} · ${j.taskIds.length} งานย่อย${originChips(j)}
           <button class="btn small ghost" data-copy="${j.id}" style="margin-left:8px">คัดลอกผลลัพธ์</button></div>
         ${j.outputDir ? `<div class="outdir">📁 ${esc(j.outputDir)} <button class="btn small ghost" data-copytext="${esc(j.outputDir)}">คัดลอกพาธ</button></div>` : ""}
         ${S.expandedResults.has(j.id) ? `<pre>${esc(j.result || "(ไม่มีผลลัพธ์)")}</pre>` : ""}

@@ -18,8 +18,9 @@ export const isLive = () => state.mode === "live";
 export const codeMode = () => { const m = String(process.env.CODE_MODE || "auto").toLowerCase(); return m === "live" || m === "sim" ? m : "auto"; };
 export const codeLive = () => (codeMode() === "auto" ? isLive() : codeMode() === "live");
 
-const VALID_ROLES = ["marketer", "researcher", "finance", "engineer", "coder", "reviewer"];
+export const VALID_ROLES = ["marketer", "researcher", "finance", "engineer", "coder", "reviewer"];
 const MAX_PLAN_TASKS = 8;
+export const MAX_EXTERNAL_PLAN_TASKS = 12; // แผนที่ส่งมากับโจทย์จากภายนอก (POST /api/jobs plan) — ผู้จัดการใหญ่ภายนอก เช่น Hermes เป็นคนกำหนดจำนวนงาน
 
 // ---------- utilities ----------
 const abortErr = () => Object.assign(new Error("งานถูกยกเลิก"), { name: "AbortError" });
@@ -218,7 +219,8 @@ const RAW_REVIEWER_RE = /qa|review|ตรวจ|compliance/;
 
 export function normalizePlan(rawTasks, roster = rosterFor(), rules = {}) {
   const load = new Map(); // งานที่แต่ละคนได้รับในแผนนี้ (ใช้กระจายงานเมื่อหน้าที่ไม่ชี้ชัด)
-  const limit = Math.max(1, Math.min(MAX_PLAN_TASKS, rules.maxTasks || MAX_PLAN_TASKS));
+  const cap = rules.maxTasksCap || MAX_PLAN_TASKS; // เพดานสูงสุด (แผนจากภายนอกใช้ MAX_EXTERNAL_PLAN_TASKS)
+  const limit = Math.max(1, Math.min(cap, rules.maxTasks || cap));
   const allowed = rules.allowedRoles?.length ? rules.allowedRoles : null;
   const limited = limitProducers(Array.isArray(rawTasks) ? rawTasks : [], limit, (t) => RAW_REVIEWER_RE.test(String(t.role || "").toLowerCase()));
   let tasks = limited.map((t, i) => {
@@ -283,6 +285,44 @@ export function normalizePlan(rawTasks, roster = rosterFor(), rules = {}) {
     t.dependsOn = [...new Set(t.dependsOn.map((d) => (reviewIndexOf.has(d) && reviewIndexOf.get(d) < i ? reviewIndexOf.get(d) : d)))];
   });
   return tasks;
+}
+
+/**
+ * ตรวจแผนที่ส่งมากับโจทย์จากภายนอก: [{ title, role | agentId, brief, dependsOn? }] (ไม่เกิน MAX_EXTERNAL_PLAN_TASKS งาน)
+ * → คืนรายการงานดิบในรูปที่ normalizePlan รับ (title, description, role, assignee, depends_on) หรือโยน Error ข้อความไทยพร้อมตำแหน่งที่ผิด
+ */
+export function validateExternalPlan(plan, roster = rosterFor()) {
+  if (!Array.isArray(plan)) throw new Error("plan ต้องเป็นอาร์เรย์ของงาน [{title, role|agentId, brief, dependsOn?}]");
+  if (!plan.length) throw new Error("plan ต้องมีอย่างน้อย 1 งาน");
+  if (plan.length > MAX_EXTERNAL_PLAN_TASKS) throw new Error(`plan มีได้ไม่เกิน ${MAX_EXTERNAL_PLAN_TASKS} งาน (ส่งมา ${plan.length})`);
+  const clean = (v) => String(v ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  return plan.map((t, i) => {
+    const at = `plan[${i}]`;
+    if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error(`${at} ต้องเป็นออบเจกต์ {title, role|agentId, brief, dependsOn?}`);
+    const title = clean(t.title);
+    if (!title) throw new Error(`${at}.title ต้องไม่ว่าง`);
+    if (title.length > 70) throw new Error(`${at}.title ยาวเกิน 70 ตัวอักษร`);
+    const brief = String(t.brief ?? t.description ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").trim();
+    if (!brief) throw new Error(`${at}.brief ต้องไม่ว่าง (บอกสิ่งที่ต้องส่งมอบ)`);
+    if (brief.length > 4000) throw new Error(`${at}.brief ยาวเกิน 4000 ตัวอักษร`);
+    let role = t.role === undefined || t.role === null ? "" : clean(t.role).toLowerCase();
+    const agentId = t.agentId === undefined || t.agentId === null ? "" : clean(t.agentId);
+    if (agentId) {
+      const a = roster.find((r) => r.id === agentId);
+      if (!a) throw new Error(`${at}.agentId "${agentId}" ไม่มีในทีม (ดูรายชื่อที่ GET /api/agents)`);
+      if (role && role !== a.role) throw new Error(`${at}: role "${role}" ไม่ตรงกับตำแหน่งของ ${agentId} (${a.role})`);
+      role = a.role;
+    }
+    if (!role) throw new Error(`${at} ต้องระบุ role (${VALID_ROLES.join(", ")}) หรือ agentId`);
+    if (!VALID_ROLES.includes(role)) throw new Error(`${at}.role "${role}" ไม่ถูกต้อง (ใช้ได้: ${VALID_ROLES.join(", ")})`);
+    const depsRaw = t.dependsOn ?? t.depends_on ?? [];
+    if (!Array.isArray(depsRaw)) throw new Error(`${at}.dependsOn ต้องเป็นอาร์เรย์ของดัชนีงานก่อนหน้า`);
+    const deps = depsRaw.map((d) => {
+      if (!Number.isInteger(d) || d < 0 || d >= i) throw new Error(`${at}.dependsOn อ้างได้เฉพาะดัชนีของงานก่อนหน้า (0-${i - 1}) แต่พบ ${JSON.stringify(d)}`);
+      return d;
+    });
+    return { title, description: brief, role, assignee: agentId, depends_on: [...new Set(deps)] };
+  });
 }
 
 async function simPlan(job, onPhase, signal, roster = rosterFor()) {
@@ -360,6 +400,16 @@ export async function planJob(job, { project = null, onPhase, signal } = {}) {
   const roster = rosterFor(project?.pack);
   const rules = planRulesFor(project?.pack);
   const cap = effectiveCaptain(project);
+  if (Array.isArray(job.plan) && job.plan.length) {
+    // แผนจากภายนอก (เช่น Hermes Agent ผ่าน POST /api/jobs plan) — กัปตันไม่ต้องคิดแผนเอง (ไม่เสียโทเคน) แต่ยังตรวจ/จัดลำดับ/เติม QA/เลือกคนตามหน้าที่เหมือนเดิม
+    // ใช้เพดาน MAX_EXTERNAL_PLAN_TASKS แทน plan.maxTasks ของโปรเจกต์ (ผู้ส่งแผนเป็นคนกำหนดจำนวนงาน) ส่วน plan.roles ของโปรเจกต์ยังบังคับ
+    for (const phase of ["กำลังอ่านแผนที่ได้รับ", "กำลังตรวจแผนและจัดลำดับ", "กำลังมอบหมายตามแผน"]) {
+      onPhase?.(phase);
+      await sleep(rand(250, 500) / speed(), signal);
+    }
+    const tasks = normalizePlan(job.plan, roster, { allowedRoles: rules.allowedRoles, maxTasks: MAX_EXTERNAL_PLAN_TASKS, maxTasksCap: MAX_EXTERNAL_PLAN_TASKS });
+    return { tasks, usage: { input_tokens: 0, output_tokens: 0 }, model: cap?.model || CAPTAIN_MODEL, external: true };
+  }
   if (!isLive()) {
     const plan = await simPlan(job, onPhase, signal, roster);
     plan.model = cap?.model || CAPTAIN_MODEL;

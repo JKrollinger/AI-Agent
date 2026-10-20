@@ -11,7 +11,9 @@ import * as orch from "./orchestrator.js";
 import { liveAvailable, countTokens } from "./llm.js";
 import { listProjects, registerProject, loadPack, buildProjectContext, reloadPacks, attachWriter, displayNameFor } from "./projects.js";
 import { WORKER_MODEL } from "./agents.js";
-import { codeMode, codeLive } from "./executor.js";
+import { codeMode, codeLive, validateExternalPlan } from "./executor.js";
+import { parseTokens, lookupToken, scopeAllows, dailyBudget, attachTokenMeter, TOKEN_DAILY_USD } from "./tokens.js";
+import { attachWebhook, checkWebhookUrl, JOB_WEBHOOK_URL, WEBHOOK_SECRET, WEBHOOK_ALLOWED_HOSTS } from "./webhook.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, "..", "public");
@@ -29,16 +31,34 @@ const hostOf = (req) => String(req.headers.host || "").replace(/:\d+$/, "").toLo
 /** คำขอมาจากภายนอกเครื่อง (ผ่าน tunnel/proxy จะมีหัว cf-connecting-ip / x-forwarded-for หรือ Host ไม่ใช่ localhost) */
 const isRemote = (req) => !!(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"]) || !LOOPBACK.has(hostOf(req));
 const safeEq = (a, b) => { const A = Buffer.from(String(a)), B = Buffer.from(String(b)); return A.length === B.length && crypto.timingSafeEqual(A, B); };
-/** HTTP Basic Auth เมื่อตั้ง AUTH_PASSWORD — ใช้กับทุก path (หน้าเว็บ, API, SSE, ไฟล์ 3 มิติ) เบราว์เซอร์จำรหัสให้จนปิดแท็บ */
-function authOk(req) {
-  if (!AUTH_PASSWORD) return true;
-  const h = String(req.headers.authorization || "");
+// โทเคนสิทธิ์จำกัดสำหรับระบบภายนอก (Hermes Agent ฯลฯ): API_TOKENS=ชื่อ:โทเคน:สิทธิ์ ส่งเป็น Authorization: Bearer — ดู server/tokens.js, docs/11-hermes.md
+const { tokens: API_TOKENS, warnings: TOKEN_WARNINGS } = parseTokens();
+function basicOk(h) {
   if (!h.startsWith("Basic ")) return false;
   let dec = "";
   try { dec = Buffer.from(h.slice(6).trim(), "base64").toString("utf8"); } catch { return false; }
   const i = dec.indexOf(":");
   return i > 0 && safeEq(dec.slice(0, i), AUTH_USER) && safeEq(dec.slice(i + 1), AUTH_PASSWORD);
 }
+/**
+ * ตัวตนของผู้เรียก: { kind: "token"|"basic"|"local", name, scope } หรือ { status: 401, error, bearer }
+ *   Bearer <โทเคน> → ต้องอยู่ใน API_TOKENS (ตรวจทุกครั้ง แม้มาจาก localhost) และถูกจำกัดสิทธิ์ตาม scope
+ *   ไม่มีโทเคน → HTTP Basic Auth เมื่อตั้ง AUTH_PASSWORD (ใช้กับทุก path: หน้าเว็บ, API, SSE, ไฟล์ 3 มิติ) ไม่ตั้ง = เปิดใช้ในเครื่อง
+ */
+function authenticate(req) {
+  const h = String(req.headers.authorization || "");
+  if (/^Bearer\s/i.test(h)) {
+    const info = lookupToken(API_TOKENS, h.slice(7).trim());
+    if (!info) return { status: 401, bearer: true, error: API_TOKENS.size ? "โทเคนไม่ถูกต้อง" : "เซิร์ฟเวอร์ยังไม่ได้ตั้ง API_TOKENS ใน .env (รูปแบบ ชื่อ:โทเคน:สิทธิ์)" };
+    return { kind: "token", name: info.name, scope: info.scope };
+  }
+  if (!AUTH_PASSWORD) return { kind: "local", name: "local", scope: "admin" };
+  if (basicOk(h)) return { kind: "basic", name: AUTH_USER, scope: "admin" };
+  return { status: 401, bearer: false, error: "ต้องใส่ชื่อผู้ใช้และรหัสผ่าน (ตั้งใน .env: AUTH_USER / AUTH_PASSWORD) หรือส่ง Authorization: Bearer <โทเคนใน API_TOKENS>" };
+}
+/** ชื่อแหล่งที่สั่งงานสำหรับบันทึกใน job.source */
+const sourceOf = (auth) => (auth.kind === "token" ? auth.name : auth.kind === "basic" ? `web:${auth.name}` : "local");
+const cleanText = (v, max) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
 const SEC_HEADERS = { "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "same-origin" };
 const jobHits = []; // timestamps ของการส่งโจทย์จากภายนอก (rate limit แบบง่าย)
 function jobRateOk() { const now = Date.now(); while (jobHits.length && now - jobHits[0] > 600_000) jobHits.shift(); if (jobHits.length >= JOB_RATE_LIMIT) return false; jobHits.push(now); return true; }
@@ -144,7 +164,7 @@ function handleSse(req, res) {
 }
 
 // ---------- Router ----------
-async function handleApi(req, res, url) {
+async function handleApi(req, res, url, auth) {
   const { pathname } = url;
   const m = req.method;
   const seg = pathname.split("/").filter(Boolean); // ["api", ...]
@@ -163,25 +183,52 @@ async function handleApi(req, res, url) {
   if (remote && (m === "POST") && (pathname === "/api/projects" || pathname === "/api/projects/reload")) {
     throw new orch.HttpError(403, "การลงทะเบียน/โหลดโปรเจกต์ใหม่ทำได้เฉพาะจากเครื่องที่รันเซิร์ฟเวอร์ (localhost) เท่านั้น");
   }
-  if (remote && m === "POST" && (pathname === "/api/jobs" || pathname === "/api/demo") && !jobRateOk()) {
+  const external = remote || auth.kind === "token"; // โทเคนจากระบบภายนอกนับเป็นภายนอกเสมอ แม้เรียกจาก localhost
+  if (external && m === "POST" && (pathname === "/api/jobs" || pathname === "/api/demo") && !jobRateOk()) {
     throw new orch.HttpError(429, `ส่งโจทย์จากภายนอกได้ไม่เกิน ${JOB_RATE_LIMIT} โจทย์ต่อ 10 นาที (ปรับที่ JOB_RATE_LIMIT ใน .env)`);
   }
   if (m === "POST" && pathname === "/api/jobs") {
     const body = await readBody(req);
     const files = Array.isArray(body.files) ? body.files.filter((f) => typeof f === "string" && f.trim() && f.length <= 260).slice(0, 10) : [];
     const projectId = typeof body.project === "string" && body.project.trim() ? body.project.trim() : null;
-    const job = orch.submitJob(body.goal, { projectId, files });
+    const requestedBy = cleanText(body.requestedBy, 120);
+    let plan = null;
+    if (body.plan !== undefined && body.plan !== null) { // แผนจากผู้จัดการใหญ่ภายนอก (เช่น Hermes) — ตรวจก่อนรับ
+      try { plan = validateExternalPlan(body.plan); } catch (err) { throw new orch.HttpError(400, err.message); }
+    }
+    let webhookUrl = null;
+    if (body.webhookUrl !== undefined && body.webhookUrl !== null && body.webhookUrl !== "") {
+      const v = checkWebhookUrl(body.webhookUrl);
+      if (v.error) throw new orch.HttpError(400, v.error);
+      webhookUrl = v.url;
+    }
+    if (auth.kind === "token") { // งบรายวันต่อโทเคน (TOKEN_DAILY_USD) — ยอดที่บันทึกแล้ววันนี้ + โจทย์ที่กำลังวิ่งของโทเคนนี้
+      const b = dailyBudget(auth.name);
+      if (!b.ok) throw new orch.HttpError(429, `โทเคน "${auth.name}" ใช้งบรายวันครบแล้ว (ใช้ไป $${b.used.toFixed(4)} จากงบ $${b.limit.toFixed(2)} ต่อวัน) — รอวันถัดไป หรือเพิ่ม TOKEN_DAILY_USD ใน .env แล้วรีสตาร์ต`);
+    }
+    const job = orch.submitJob(body.goal, { projectId, files, plan, requestedBy, webhookUrl, source: sourceOf(auth), sourceKind: auth.kind });
     return sendJson(res, 202, { job }); // 202 = รับแล้ว กัปตันกำลังวางแผน (ติดตามทาง SSE หรือ GET /api/jobs/:id)
   }
   if (m === "POST" && pathname === "/api/demo") {
     const body = await readBody(req);
     const goal = DEMO_GOALS[demoIndex++ % DEMO_GOALS.length];
     const projectId = typeof body.project === "string" && body.project.trim() ? body.project.trim() : null;
-    const job = orch.submitJob(goal, { projectId });
+    const job = orch.submitJob(goal, { projectId, source: sourceOf(auth), sourceKind: auth.kind });
     return sendJson(res, 202, { job });
+  }
+  if (m === "GET" && pathname === "/api/jobs") { // รายการโจทย์ (ล่าสุดก่อน) สำหรับระบบภายนอก — ไม่รวมผลลัพธ์เต็ม (ดู GET /api/jobs/:id)
+    const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
+    const status = url.searchParams.get("status");
+    const jobs = [...state.jobs.values()].filter((j) => !status || j.status === status).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)
+      .map(({ result, plan, ...j }) => ({ ...j, taskCount: j.taskIds.length, resultChars: (result || "").length }));
+    return sendJson(res, 200, { jobs });
   }
   if (m === "GET" && seg[1] === "jobs" && seg[2]) {
     return sendJson(res, 200, orch.getJobDetail(decodeURIComponent(seg[2])));
+  }
+  if (m === "GET" && pathname === "/api/agents") { // รายชื่อทีม + ตำแหน่ง + หน้าที่ (ให้ผู้จัดการใหญ่ภายนอกเลือก agentId/role ตอนวางแผน)
+    const agents = [...state.agents.values()].map((a) => ({ id: a.id, name: a.name, nick: a.nick, role: a.role, roleLabel: a.roleLabel, emoji: a.emoji, duties: a.duties, model: a.model, tools: a.tools, status: a.status, canAssign: a.role !== "captain" }));
+    return sendJson(res, 200, { agents, roles: [...new Set(agents.filter((a) => a.canAssign).map((a) => a.role))] });
   }
   if (m === "GET" && pathname === "/api/projects") return sendJson(res, 200, { projects: listProjects() });
   if (m === "POST" && pathname === "/api/projects") {
@@ -262,18 +309,25 @@ async function handleApi(req, res, url) {
 
 // เขียนผลงานกลับเข้าโปรเจกต์ (เมื่อโจทย์ผูกกับ Project Pack) — ทำงานทั้งโหมด sim และ live
 attachWriter(bus, { agentNameOf: (id, pack) => displayNameFor(state.agents.get(id), pack) || "" }); // ไฟล์ใน .grock/out ใช้ชื่อเฉพาะโปรเจกต์ (project.json roles/agents .name)
+attachTokenMeter(bus); // ต้นทุนของโจทย์ที่สั่งผ่านโทเคน → งบรายวัน (data/token-usage.json)
+attachWebhook(bus); // โจทย์เสร็จ/ล้มเหลว → POST สรุปไปยัง JOB_WEBHOOK_URL หรือ webhookUrl ของโจทย์ (หลัง attachWriter เพื่อให้ result.md ถูกเขียนก่อน)
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
-    if (!authOk(req)) { // รหัสผ่านก่อนทุกอย่าง (รวมไฟล์หน้าเว็บ) เมื่อตั้ง AUTH_PASSWORD
+    const auth = authenticate(req); // ตัวตนก่อนทุกอย่าง (รวมไฟล์หน้าเว็บ): Bearer token ตาม API_TOKENS หรือ Basic Auth เมื่อตั้ง AUTH_PASSWORD
+    if (auth.status) {
+      if (auth.bearer) return sendJson(res, 401, { error: auth.error });
       res.writeHead(401, { "WWW-Authenticate": 'Basic realm="AI Workforce Control Center", charset="UTF-8"', "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...SEC_HEADERS });
-      return res.end("ต้องใส่ชื่อผู้ใช้และรหัสผ่าน (ตั้งใน .env: AUTH_USER / AUTH_PASSWORD)");
+      return res.end(auth.error);
+    }
+    if (auth.kind === "token" && !scopeAllows(auth.scope, req.method, url.pathname)) { // สิทธิ์ของโทเคนบังคับทุกคำขอ ไม่ว่ามาจากที่ใด
+      return sendJson(res, 403, { error: `โทเคน "${auth.name}" (สิทธิ์ ${auth.scope}) ไม่มีสิทธิ์เรียก ${req.method} ${url.pathname}` });
     }
     if (url.pathname.startsWith("/api/")) {
       const denied = requestAllowed(req);
       if (denied) return sendJson(res, denied.status, { error: denied.error });
-      return await handleApi(req, res, url);
+      return await handleApi(req, res, url, auth);
     }
     if (req.method !== "GET") return sendJson(res, 405, { error: "method not allowed" });
     return serveStatic(req, res, url.pathname);
@@ -304,8 +358,12 @@ server.listen(PORT, HOST, () => {
   else if (codeMode() === "sim" && state.mode === "live") console.log(`   🧑‍💻 CODE_MODE=sim: Developer ไม่เรียก Claude Code (ได้ patch จำลอง) แม้ระบบอยู่โหมด LIVE`);
   if (AUTH_PASSWORD) console.log(`   🔒 ต้องใส่รหัสผ่าน (ผู้ใช้ "${AUTH_USER}")${ALLOWED_HOSTS.length ? ` · เปิดรับโดเมน: ${ALLOWED_HOSTS.join(", ")}` : ""}`);
   else if (ALLOWED_HOSTS.length) console.log(`   ⚠️ เปิดรับโดเมน ${ALLOWED_HOSTS.join(", ")} โดยไม่มีรหัสผ่าน — ตั้ง AUTH_PASSWORD ใน .env ก่อนเปิดสาธารณะ`);
+  if (API_TOKENS.size) console.log(`   🎫 โทเคน API: ${[...API_TOKENS.values()].map((t) => `${t.name} (${t.scope})`).join(", ")} · งบรายวัน ${TOKEN_DAILY_USD > 0 ? `$${TOKEN_DAILY_USD}` : "ไม่จำกัด"} ต่อโทเคน`);
+  for (const w of TOKEN_WARNINGS) console.log(`   ⚠️ ${w}`);
+  if (JOB_WEBHOOK_URL || WEBHOOK_ALLOWED_HOSTS.length) console.log(`   📡 webhook แจ้งผล: ${JOB_WEBHOOK_URL || "(เฉพาะ webhookUrl ที่ส่งมากับโจทย์)"}${WEBHOOK_ALLOWED_HOSTS.length ? ` · host ที่รับได้: ${WEBHOOK_ALLOWED_HOSTS.join(", ")}` : ""}${WEBHOOK_SECRET ? " · มีลายเซ็น" : " · ⚠️ ไม่มี WEBHOOK_SECRET (ส่งโดยไม่มีลายเซ็น)"}`);
   console.log("");
   bus.log(`🚀 ระบบเริ่มทำงานในโหมด ${state.mode.toUpperCase()}`);
+  for (const w of TOKEN_WARNINGS) bus.log(`⚠️ ${w}`, { level: "warn" });
   if (codeMode() === "live" && state.mode !== "live") bus.log("🧑‍💻 CODE_MODE=live — งานแก้ไฟล์ของ Developer เรียก Claude Code จริง (กัปตัน/QA ยังจำลอง) ต้นทุนที่ CLI รายงานนับเข้าโจทย์", { level: "warn" });
   else if (codeMode() === "sim" && state.mode === "live") bus.log("🧑‍💻 CODE_MODE=sim — Developer ไม่เรียก Claude Code (patch จำลอง)", { level: "warn" });
 });

@@ -82,8 +82,13 @@ function projectFor(jobId, role = "captain") {
  * @param {object} [opts]
  * @param {string|null} [opts.projectId]  id ของ Project Pack ที่ลงทะเบียนไว้
  * @param {string[]} [opts.files]         ไฟล์ในโปรเจกต์ที่ให้ทีมอ่านประกอบ (path สัมพัทธ์)
+ * @param {object[]|null} [opts.plan]     แผนจากภายนอกที่ผ่าน validateExternalPlan แล้ว (กัปตันใช้แทนการวางแผนเอง)
+ * @param {string} [opts.source]          ใครสั่ง: "local" | ชื่อโทเคน | "web:<user>"
+ * @param {string} [opts.sourceKind]      local | token | basic
+ * @param {string} [opts.requestedBy]     ข้อความอิสระจากผู้เรียก เช่น "telegram:@user"
+ * @param {string|null} [opts.webhookUrl] ปลายทางแจ้งผลเฉพาะโจทย์นี้ (ตรวจ host แล้ว)
  */
-export function submitJob(goal, { projectId = null, files = [] } = {}) {
+export function submitJob(goal, { projectId = null, files = [], plan = null, source = "local", sourceKind = "local", requestedBy = "", webhookUrl = null } = {}) {
   goal = String(goal || "").trim();
   if (!goal) throw new HttpError(400, "กรุณาระบุโจทย์งาน");
   if (goal.length > 2000) throw new HttpError(400, "โจทย์ยาวเกิน 2000 ตัวอักษร");
@@ -96,7 +101,7 @@ export function submitJob(goal, { projectId = null, files = [] } = {}) {
     }
   }
 
-  const job = newJob(goal, { project: pack ? pack.id : null, files: pack ? files : [] });
+  const job = newJob(goal, { project: pack ? pack.id : null, files: pack ? files : [], plan: plan?.length ? plan : null, source, sourceKind, requestedBy, webhookUrl });
   if (pack) {
     let out;
     try {
@@ -109,7 +114,8 @@ export function submitJob(goal, { projectId = null, files = [] } = {}) {
     setJobContext(job.id, { pack, files, outDir: out.abs, outDirRel: out.rel, tasks: new Map(), roleData: new Map(), filesRead: null, job });
   }
   emitJob("job.created", job);
-  bus.log(`📥 รับโจทย์ใหม่: "${goal}"${pack ? ` (โปรเจกต์ ${pack.name})` : ""}`, { jobId: job.id });
+  const who = source !== "local" ? ` · จาก ${source}${requestedBy ? ` (${requestedBy})` : ""}` : requestedBy ? ` · ${requestedBy}` : "";
+  bus.log(`📥 รับโจทย์ใหม่: "${goal}"${pack ? ` (โปรเจกต์ ${pack.name})` : ""}${who}${job.plan ? ` · มาพร้อมแผน ${job.plan.length} งาน` : ""}`, { jobId: job.id });
   if (pack) {
     const ctx = projectFor(job.id, "captain");
     const included = buildProjectContext(pack, { role: "captain" }).files.filter((f) => !f.skippedReason).length;
@@ -138,9 +144,13 @@ async function planAndStart(job) {
       },
     });
     if (!plan.tasks.length) throw new Error("กัปตันวางแผนไม่สำเร็จ (ไม่มีงานย่อย)");
+    const external = Boolean(plan.external);
+    const planned = job.plan?.length || 0;
+    job.planSource = external ? "external" : "captain";
+    job.plan = null; // แผนดิบถูกแปลงเป็นงานย่อยแล้ว (plan.json เก็บฉบับที่ใช้จริง)
 
     const created = plan.tasks.map((t, i) =>
-      createTask({ jobId: job.id, seq: i + 1, title: t.title, description: t.description, role: t.role, preferredAgentId: t.assignee || null }),
+      createTask({ jobId: job.id, seq: i + 1, title: t.title, description: t.description, role: t.role, preferredAgentId: t.assignee || null, note: external ? `สร้างตามแผนจาก ${job.source}${i >= planned ? " (กัปตันเติม QA)" : ""}` : "สร้างงานโดยกัปตัน" }),
     );
     created.forEach((t) => {
       const pref = t.preferredAgentId ? getAgent(t.preferredAgentId) : null;
@@ -159,11 +169,14 @@ async function planAndStart(job) {
 
     created.forEach((t) => emitTask("task.created", t));
     emitJob("job.planned", job);
-    bus.log(`🧭 กัปตันแตกโจทย์เป็น ${created.length} งานย่อย และเริ่มมอบหมาย`, { jobId: job.id });
+    bus.log(external
+      ? `📋 กัปตันรับแผน ${planned} งานจาก ${job.source} ตรวจแล้วได้ ${created.length} งานย่อย${created.length > planned ? ` (เติม QA ${created.length - planned} งาน)` : ""} และเริ่มมอบหมาย`
+      : `🧭 กัปตันแตกโจทย์เป็น ${created.length} งานย่อย และเริ่มมอบหมาย`, { jobId: job.id });
   } catch (err) {
     if (ac.signal.aborted) return job;
     job.status = "failed";
     job.finishedAt = now();
+    job.error = `วางแผนงานไม่สำเร็จ: ${err.message}`.slice(0, 300);
     emitJob("job.failed", job);
     bus.log(`❌ วางแผนงานไม่สำเร็จ: ${err.message}`, { jobId: job.id, level: "error" });
   } finally {
@@ -208,6 +221,7 @@ function failJobForBudget(job, spent, max) {
   job.status = "failed";
   job.finishedAt = now();
   job.costUsd = spent;
+  job.error = `ใช้เงินเกินงบ ($${spent.toFixed(4)} > $${max.toFixed(2)})`;
   emitJob("job.failed", job);
   bus.log(`💸 โจทย์ "${shorten(job.goal, 50)}" ใช้เงินเกินงบ ($${spent.toFixed(4)} > $${max.toFixed(2)}) — หยุดมอบหมายงานที่เหลือ ผลงานที่เสร็จแล้วยังถูกบันทึก`, { jobId: job.id, level: "error" });
 }
@@ -524,6 +538,7 @@ function fail(task, agent, err) {
     if (job && job.status !== "failed") {
       job.status = "failed";
       job.finishedAt = now();
+      job.error = `งาน "${task.title}" ล้มเหลว: ${msg}`.slice(0, 300);
       emitJob("job.failed", job);
     }
   }
@@ -570,6 +585,7 @@ async function checkJob(jobId) {
     if (ac.signal.aborted) return;
     job.status = "failed";
     job.finishedAt = now();
+    job.error = `รวบรวมผลงานไม่สำเร็จ: ${err.message}`.slice(0, 300);
     emitJob("job.failed", job);
     bus.log(`❌ รวบรวมผลงานไม่สำเร็จ: ${err.message}`, { jobId: job.id, level: "error" });
   } finally {
@@ -655,6 +671,7 @@ export function retryTask(taskId) {
     }
     job.status = "running";
     job.finishedAt = null;
+    job.error = null;
     emitJob("job.updated", job);
   } else {
     assertJobActive(task);

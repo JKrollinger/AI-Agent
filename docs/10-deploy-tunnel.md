@@ -22,6 +22,7 @@ JOB_RATE_LIMIT=20
 | `ALLOWED_HOSTS` | รับคำขอเฉพาะ `Host` ที่เป็น localhost หรืออยู่ในรายการ (กัน DNS rebinding) ถ้าเปิดผ่านโดเมนที่ไม่ได้ใส่ไว้จะได้ 403 พร้อมข้อความบอกวิธีแก้ |
 | คำขอจากภายนอก (มีหัว `cf-connecting-ip`/`x-forwarded-for` หรือ Host ไม่ใช่ localhost) | `POST /api/projects` และ `/api/projects/reload` ถูกปิด (403) — ลงทะเบียนโปรเจกต์ใหม่ได้เฉพาะจาก localhost · ส่งโจทย์ (`/api/jobs`, `/api/demo`) ไม่เกิน `JOB_RATE_LIMIT` ต่อ 10 นาที (429) |
 | ส่วนหัวความปลอดภัย | `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` (ฉาก 3 มิติเป็น iframe โดเมนเดียวกัน จึงใช้ได้), `Referrer-Policy: same-origin` |
+| `API_TOKENS` (ไม่บังคับ) | โทเคนสิทธิ์จำกัดสำหรับระบบภายนอก (Hermes Agent, บอท, สคริปต์) ส่งเป็น `Authorization: Bearer` แทน Basic Auth — สิทธิ์ `jobs` สั่ง/ดูโจทย์ได้เท่านั้น มีงบรายวัน `TOKEN_DAILY_USD` และนับ `JOB_RATE_LIMIT` เสมอ — ดู [docs/11-hermes.md](11-hermes.md) |
 
 หลังแก้ `.env` ต้องรีสตาร์ต `npm start` ทุกครั้ง
 
