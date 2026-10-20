@@ -68,7 +68,20 @@ ingress:
 cloudflared tunnel run grock
 ```
 
-ให้รันเองตอนเปิดเครื่อง: `cloudflared service install` (ติดตั้งเป็น Windows service ใช้ config ข้างต้น) และตั้ง `npm start` ให้รันอัตโนมัติด้วย (เช่น Task Scheduler หรือ `pm2`/`nssm`)
+ให้รันเองตอนเปิดเครื่อง: `cloudflared service install` (ติดตั้งเป็น Windows service) และตั้ง `npm start` ให้รันอัตโนมัติตามข้อ 3.1
+
+### 3.1 ให้ `npm start` รันเองตอนล็อกอิน (Task Scheduler — ไม่ต้องติดตั้งอะไรเพิ่ม)
+
+สคริปต์อยู่ใน `tools/autostart/`: `install-task.ps1` ลงทะเบียน task ชื่อ **Grock Agent Server** (ทริกเกอร์ตอนล็อกอินของผู้ใช้ปัจจุบัน หน่วง 15 วินาที) ให้รัน `server-autostart.vbs` → `server-autostart.cmd` ซึ่งเปิด `npm start` แบบซ่อนหน้าต่างในโฟลเดอร์โปรเจกต์ (โหลด `.env` ตามปกติ) บันทึก stdout/stderr ลง `logs/server.log` (หมุนไฟล์เมื่อเกิน ~5 MB) และคืน exit code ให้ Task Scheduler รีสตาร์ตให้เองสูงสุด 3 ครั้งถ้าเซิร์ฟเวอร์ล้ม
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\autostart\install-task.ps1   # ลงทะเบียน (ไม่ต้องสิทธิ์ผู้ดูแล)
+Start-ScheduledTask -TaskName "Grock Agent Server"   # เริ่มทันทีโดยไม่ต้องล็อกอินใหม่ (ปิด npm start ที่รันค้างอยู่ก่อน ไม่งั้นพอร์ตชน)
+Stop-ScheduledTask -TaskName "Grock Agent Server"    # หยุดเซิร์ฟเวอร์
+Unregister-ScheduledTask -TaskName "Grock Agent Server" -Confirm:$false   # ถอน
+```
+
+task ทำงานเฉพาะเมื่อผู้ใช้ล็อกอินแล้ว — ถ้าต้องการให้ขึ้นตั้งแต่บูตโดยไม่ต้องล็อกอิน ให้เปิด Task Scheduler → Properties ของ task → ติ๊ก "Run whether user is logged on or not" แล้วใส่รหัสผ่าน Windows ของคุณเอง (ต้องเป็นบัญชีเดียวกับที่ติดตั้ง Claude Code เพราะ Developer โหมดเรียก `claude` CLI ที่อ่าน credentials จากโปรไฟล์ของคุณ) หรือเปิด auto sign-in ของ Windows
 
 **ชั้นล็อกอินเพิ่ม (แนะนำเมื่อใช้โดเมนจริง):** ใน Cloudflare Zero Trust → Access → Applications เพิ่ม `ai.example.com` แล้วกำหนดให้เฉพาะอีเมลของคุณ/ทีมเข้าได้ (ส่งรหัส OTP ทางอีเมล) คำขอที่ไม่ผ่าน Access จะไม่ถึงเครื่องคุณเลย ส่วนรหัสผ่าน Basic Auth ยังเป็นชั้นที่สอง
 
