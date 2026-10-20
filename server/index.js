@@ -1,6 +1,7 @@
 // index.js — HTTP server: หน้าเว็บ dashboard + REST API + SSE (เหตุการณ์เรียลไทม์)
 // ไม่ใช้ framework ภายนอก (Node >= 22) เพื่อให้อ่าน/ดัดแปลงง่าย
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,11 +17,36 @@ const PUBLIC_DIR = path.join(here, "..", "public");
 const PORT = Number(process.env.PORT || 3789);
 const HOST = process.env.HOST || "127.0.0.1";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-// กัน DNS-rebinding/CSRF: endpoint ที่แตะดิสก์ (ลงทะเบียนโปรเจกต์/สั่งงาน) รับเฉพาะคำขอจากหน้าเว็บบนเครื่องนี้และต้องเป็น JSON
+// ---------- เปิดใช้งานจากอินเทอร์เน็ต (ผ่าน Cloudflare Tunnel ฯลฯ) — ดู docs/10-deploy-tunnel.md ----------
+// ALLOWED_HOSTS = โดเมนที่ยอมให้เรียกเข้ามา (คั่นด้วย ,) ขึ้นต้นด้วย . = ทุกโดเมนย่อย เช่น ".trycloudflare.com,ai.example.com"
+// AUTH_PASSWORD (+ AUTH_USER ค่าเริ่มต้น admin) = รหัสผ่านเข้าใช้ทั้งหน้าเว็บและ API (HTTP Basic Auth) — ต้องตั้งเสมอเมื่อเปิดสาธารณะ
+const ALLOWED_HOSTS = String(process.env.ALLOWED_HOSTS || "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+const AUTH_USER = process.env.AUTH_USER || "admin";
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "";
+const JOB_RATE_LIMIT = Math.max(1, Number(process.env.JOB_RATE_LIMIT || 20)); // โจทย์ใหม่สูงสุดต่อ 10 นาที จากภายนอก
+const hostOf = (req) => String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+/** คำขอมาจากภายนอกเครื่อง (ผ่าน tunnel/proxy จะมีหัว cf-connecting-ip / x-forwarded-for หรือ Host ไม่ใช่ localhost) */
+const isRemote = (req) => !!(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"]) || !LOOPBACK.has(hostOf(req));
+const safeEq = (a, b) => { const A = Buffer.from(String(a)), B = Buffer.from(String(b)); return A.length === B.length && crypto.timingSafeEqual(A, B); };
+/** HTTP Basic Auth เมื่อตั้ง AUTH_PASSWORD — ใช้กับทุก path (หน้าเว็บ, API, SSE, ไฟล์ 3 มิติ) เบราว์เซอร์จำรหัสให้จนปิดแท็บ */
+function authOk(req) {
+  if (!AUTH_PASSWORD) return true;
+  const h = String(req.headers.authorization || "");
+  if (!h.startsWith("Basic ")) return false;
+  let dec = "";
+  try { dec = Buffer.from(h.slice(6).trim(), "base64").toString("utf8"); } catch { return false; }
+  const i = dec.indexOf(":");
+  return i > 0 && safeEq(dec.slice(0, i), AUTH_USER) && safeEq(dec.slice(i + 1), AUTH_PASSWORD);
+}
+const SEC_HEADERS = { "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "same-origin" };
+const jobHits = []; // timestamps ของการส่งโจทย์จากภายนอก (rate limit แบบง่าย)
+function jobRateOk() { const now = Date.now(); while (jobHits.length && now - jobHits[0] > 600_000) jobHits.shift(); if (jobHits.length >= JOB_RATE_LIMIT) return false; jobHits.push(now); return true; }
+// กัน DNS-rebinding/CSRF: รับเฉพาะ Host ที่เป็น localhost หรืออยู่ใน ALLOWED_HOSTS และ POST ต้องเป็น JSON
 function requestAllowed(req) {
   if (LOOPBACK.has(HOST)) { // ทุก method (GET ก็อ่านไฟล์โปรเจกต์ได้ จึงต้องกัน DNS rebinding ด้วย)
-    const host = String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
-    if (!LOOPBACK.has(host)) return { status: 403, error: "Host ไม่ถูกต้อง (รับเฉพาะ localhost)" };
+    const host = hostOf(req);
+    const ok = LOOPBACK.has(host) || ALLOWED_HOSTS.some((h) => (h.startsWith(".") ? host.endsWith(h) || host === h.slice(1) : host === h));
+    if (!ok) return { status: 403, error: `Host "${host}" ไม่ได้รับอนุญาต — เพิ่มใน ALLOWED_HOSTS ใน .env แล้วรีสตาร์ต` };
   }
   if (req.method !== "POST") return null;
   const ct = String(req.headers["content-type"] || "").toLowerCase();
@@ -55,7 +81,7 @@ const MIME = {
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...SEC_HEADERS });
   res.end(body);
 }
 
@@ -87,7 +113,7 @@ function serveStatic(req, res, pathname) {
   if (!file.startsWith(PUBLIC_DIR)) return sendJson(res, 403, { error: "forbidden" });
   fs.readFile(file, (err, data) => {
     if (err) return sendJson(res, 404, { error: "ไม่พบไฟล์" });
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-cache" });
+    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-cache", ...SEC_HEADERS });
     res.end(data);
   });
 }
@@ -132,6 +158,13 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, mode: state.mode, liveAvailable: liveAvailable(), clients: sseClients.size, uptimeMs: Date.now() - state.startedAt });
   }
 
+  const remote = isRemote(req);
+  if (remote && (m === "POST") && (pathname === "/api/projects" || pathname === "/api/projects/reload")) {
+    throw new orch.HttpError(403, "การลงทะเบียน/โหลดโปรเจกต์ใหม่ทำได้เฉพาะจากเครื่องที่รันเซิร์ฟเวอร์ (localhost) เท่านั้น");
+  }
+  if (remote && m === "POST" && (pathname === "/api/jobs" || pathname === "/api/demo") && !jobRateOk()) {
+    throw new orch.HttpError(429, `ส่งโจทย์จากภายนอกได้ไม่เกิน ${JOB_RATE_LIMIT} โจทย์ต่อ 10 นาที (ปรับที่ JOB_RATE_LIMIT ใน .env)`);
+  }
   if (m === "POST" && pathname === "/api/jobs") {
     const body = await readBody(req);
     const files = Array.isArray(body.files) ? body.files.filter((f) => typeof f === "string" && f.trim() && f.length <= 260).slice(0, 10) : [];
@@ -232,6 +265,10 @@ attachWriter(bus, { agentNameOf: (id, pack) => displayNameFor(state.agents.get(i
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
+    if (!authOk(req)) { // รหัสผ่านก่อนทุกอย่าง (รวมไฟล์หน้าเว็บ) เมื่อตั้ง AUTH_PASSWORD
+      res.writeHead(401, { "WWW-Authenticate": 'Basic realm="AI Workforce Control Center", charset="UTF-8"', "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...SEC_HEADERS });
+      return res.end("ต้องใส่ชื่อผู้ใช้และรหัสผ่าน (ตั้งใน .env: AUTH_USER / AUTH_PASSWORD)");
+    }
     if (url.pathname.startsWith("/api/")) {
       const denied = requestAllowed(req);
       if (denied) return sendJson(res, denied.status, { error: denied.error });
@@ -261,6 +298,9 @@ server.listen(PORT, HOST, () => {
   const modeLabel = state.mode === "live" ? "LIVE (เรียก Claude จริง)" : "SIM (จำลอง — ตั้ง ANTHROPIC_API_KEY ใน .env เพื่อใช้โมเดลจริง)";
   console.log(`\n🧭 AI Workforce Control Center`);
   console.log(`   เปิดหน้าควบคุม: http://${HOST}:${PORT}`);
-  console.log(`   โหมด: ${modeLabel}\n`);
+  console.log(`   โหมด: ${modeLabel}`);
+  if (AUTH_PASSWORD) console.log(`   🔒 ต้องใส่รหัสผ่าน (ผู้ใช้ "${AUTH_USER}")${ALLOWED_HOSTS.length ? ` · เปิดรับโดเมน: ${ALLOWED_HOSTS.join(", ")}` : ""}`);
+  else if (ALLOWED_HOSTS.length) console.log(`   ⚠️ เปิดรับโดเมน ${ALLOWED_HOSTS.join(", ")} โดยไม่มีรหัสผ่าน — ตั้ง AUTH_PASSWORD ใน .env ก่อนเปิดสาธารณะ`);
+  console.log("");
   bus.log(`🚀 ระบบเริ่มทำงานในโหมด ${state.mode.toUpperCase()}`);
 });

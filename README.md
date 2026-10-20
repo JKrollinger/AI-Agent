@@ -108,6 +108,28 @@ node tools/grock.mjs run "เขียนแผนทดสอบสำหรั
 
 ทดสอบทั้งชุด (unit + e2e ในโหมด sim กับโปรเจกต์ชั่วคราวใน temp ไม่เรียก API จริง): `npm test`
 
+## เปิดใช้งานจากอินเทอร์เน็ต (Cloudflare Tunnel)
+
+รันเซิร์ฟเวอร์บนเครื่องคุณตามเดิม แล้วให้ Cloudflare Tunnel เปิดทางเข้าจากอินเทอร์เน็ตพร้อม HTTPS โดยไม่ต้องเปิดพอร์ตที่เราเตอร์ — โปรเจกต์บนดิสก์และ Developer แก้ไฟล์จริงยังใช้ได้เหมือนเดิม ตั้งใน `.env` ก่อน:
+
+```ini
+AUTH_PASSWORD=รหัสผ่านของคุณ        # ทุกหน้า/API/SSE ถามรหัส (HTTP Basic Auth, ผู้ใช้ AUTH_USER ค่าเริ่มต้น admin)
+ALLOWED_HOSTS=.trycloudflare.com    # โดเมนที่ยอมให้เรียกเข้ามา (คั่นด้วย ,) ขึ้นต้นด้วย . = ทุกโดเมนย่อย
+JOB_RATE_LIMIT=20                   # โจทย์จากภายนอกสูงสุดต่อ 10 นาที
+```
+
+แล้วเปิด 2 เทอร์มินัล:
+
+```bash
+npm start
+```
+
+```bash
+npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิมพ์ https://<คำสุ่ม>.trycloudflare.com ให้
+```
+
+คำขอจากภายนอกลงทะเบียนโปรเจกต์ใหม่ไม่ได้ (ทำที่เครื่องเท่านั้น) ใช้โดเมนของตัวเอง, รันเป็น Windows service, เพิ่มชั้นล็อกอิน Cloudflare Access และข้อควรระวัง: [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md)
+
 ## REST API (ใช้ต่อกับระบบอื่นได้)
 
 | Method | Path | ใช้ทำอะไร |
@@ -147,3 +169,4 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
 - [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo
+- [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md) — เปิดใช้งานจากอินเทอร์เน็ตด้วย Cloudflare Tunnel: รหัสผ่าน, `ALLOWED_HOSTS`, quick/named tunnel, Windows service, Cloudflare Access
