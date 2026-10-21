@@ -134,7 +134,8 @@ export class S3Client {
     if (body !== null && contentType) headers["content-type"] = contentType;
     const { authorization } = signV4({ method, path: url.pathname, query: url.search.slice(1), headers, payloadHash, amzDate, accessKeyId: this.cfg.accessKeyId, secretAccessKey: this.cfg.secretAccessKey, region: this.cfg.region });
     const { host, ...send } = headers;
-    const res = await this.fetch(url, { method, headers: { ...send, authorization }, body: body === null ? undefined : body, signal: AbortSignal.timeout(this.cfg.timeoutMs || 60_000) });
+    // accept-encoding: identity — R2 ส่ง gzip ให้ fetch แล้ว content-length หาย ทำให้ HEAD อ่านขนาดไม่ได้ (หัวนี้ไม่ต้องเซ็น)
+    const res = await this.fetch(url, { method, headers: { ...send, authorization, "accept-encoding": "identity" }, body: body === null ? undefined : body, signal: AbortSignal.timeout(this.cfg.timeoutMs || 60_000) });
     return res;
   }
   /** PUT object → { ok, status, error } (ไม่โยน error) */
@@ -150,7 +151,7 @@ export class S3Client {
     }
   }
   async headObject(key) {
-    try { const res = await this.request("HEAD", key); try { res.body?.cancel?.(); } catch {} return { ok: res.ok, status: res.status, size: Number(res.headers.get("content-length")) || 0 }; }
+    try { const res = await this.request("HEAD", key); try { res.body?.cancel?.(); } catch {} const len = res.headers.get("content-length"); return { ok: res.ok, status: res.status, size: len === null ? null : Number(len) || 0 }; } // size null = ปลายทางไม่บอกขนาด
     catch (err) { return { ok: false, status: 0, error: err.message }; }
   }
   async getObject(key) {
@@ -219,6 +220,8 @@ export function workspaceFiles(job, tasks = [], { agentNameOf = () => "" } = {})
   files.push({ rel: "job.json", body: JSON.stringify({
     id: job.id, goal: job.goal, project: "workspace", status: job.status, source: job.source || "local", requestedBy: job.requestedBy || "", error: job.error || null,
     createdAt: ts(job.createdAt), finishedAt: ts(job.finishedAt), costUsd: job.costUsd || 0,
+    // ผลการเก็บขึ้นคลาวด์ (มีค่าเมื่อถูกส่งซ้ำหลังอัปโหลดเสร็จ — รอบแรกยังเป็น uploading)
+    storage: job.storage ? { uploaded: Boolean(job.storage.uploaded), status: job.storage.status, url: job.storage.url || null, resultUrl: job.storage.resultUrl || null, bucket: job.storage.bucket || null, keyPrefix: job.storage.keyPrefix || null, files: job.storage.files || 0, bytes: job.storage.bytes || 0, error: job.storage.error || null, at: ts(job.storage.at) } : null,
     tasks: sorted.map((t) => ({ id: t.id, seq: t.seq, title: t.title, role: t.role, status: t.status, assignedTo: t.assignedTo, attempts: t.attempts, usage: t.usage, review: t.review ? { score: t.review.score, approved: t.review.approved } : null, file: `tasks/${pad2(t.seq || 0)}-${t.role}-${slug(t.title)}.md` })),
   }, null, 2) + "\n" });
   return files;

@@ -34,7 +34,7 @@ $dotenv = @{}
 if (Test-Path -LiteralPath $envFile) {
   # ใช้เฉพาะ single quote ใน JS — PowerShell 5.1 ส่ง double quote ที่ซ้อนในอาร์กิวเมนต์ให้โปรแกรมภายนอกไม่ครบ
   $js = "const u=require('util'),f=require('fs');const e=u.parseEnv(f.readFileSync(process.argv[1],'utf8'));" +
-        "process.stdout.write(JSON.stringify({PORT:e.PORT||'',HOST:e.HOST||'',AUTH_USER:e.AUTH_USER||'',AUTH_PASSWORD:e.AUTH_PASSWORD||''}))"
+        "process.stdout.write(JSON.stringify({PORT:e.PORT||'',HOST:e.HOST||'',AUTH_USER:e.AUTH_USER||'',AUTH_PASSWORD:e.AUTH_PASSWORD||'',DASHBOARD_TOKEN:e.DASHBOARD_TOKEN||''}))"
   try {
     $json = & node -e $js $envFile
     if ($LASTEXITCODE -ne 0 -or -not $json) { throw "node คืน exit code $LASTEXITCODE" }
@@ -143,7 +143,7 @@ if (Test-Path -LiteralPath $pidFile) { Remove-Item -LiteralPath $pidFile -Force 
 
 # --- 6) Start-ScheduledTask ---
 try { Start-ScheduledTask -TaskName $TaskName } catch { Fail 4 "Start-ScheduledTask ไม่สำเร็จ: $($_.Exception.Message)" }
-$authNote = if ($headers.Count) { " · Basic Auth ผู้ใช้ '$authUser'" } else { "" }
+$authNote = if ($dotenv.DASHBOARD_TOKEN) { " · Bearer DASHBOARD_TOKEN" } elseif ($headers.Count) { " · Basic Auth ผู้ใช้ '$authUser'" } else { "" }
 Write-Host "เริ่ม task แล้ว — รอ $healthUrl ตอบ 200 (สูงสุด $HealthTimeoutSec วิ)$authNote"
 
 # --- 7) รอ /api/health ---

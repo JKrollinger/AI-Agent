@@ -223,7 +223,10 @@ try {
   const wsKeys = [...s3.objects.keys()].filter((k) => k.startsWith(prefix2 + "/"));
   assert.ok(wsKeys.includes(`${prefix2}/result.md`) && wsKeys.includes(`${prefix2}/job.json`) && wsKeys.filter((k) => k.includes("/tasks/")).length === d2.tasks.length, wsKeys.join(","));
   assert.ok(s3.objects.get(`${prefix2}/result.md`).body.toString("utf8").includes(d2.job.result.slice(0, 40)));
-  console.log("✅ โจทย์ workspace: result.md/tasks/job.json จากหน่วยความจำขึ้น grock/workspace/<jobId>/");
+  await sleep(500); // job.json ของ workspace ถูกส่งซ้ำพร้อม storage หลังอัปโหลดเสร็จ
+  const wsJobJson = JSON.parse(s3.objects.get(`${prefix2}/job.json`).body.toString("utf8"));
+  assert.equal(wsJobJson.project, "workspace"); assert.equal(wsJobJson.storage?.uploaded, true, "job.json ของ workspace บนคลาวด์ต้องมี storage.uploaded"); assert.equal(wsJobJson.storage.url, d2.job.storage.url);
+  console.log("✅ โจทย์ workspace: result.md/tasks/job.json จากหน่วยความจำขึ้น grock/workspace/<jobId>/ (job.json ส่งซ้ำพร้อม storage)");
 
   // ---------- ปฏิเสธ push + โปรเจกต์ที่ไม่ใช่ repo → skipped ----------
   const j3 = await post("/api/jobs", { goal: "ทดสอบปฏิเสธ push", project: "onlineproj", plan }, bearer);

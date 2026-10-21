@@ -16,7 +16,7 @@ import { parseTokens, lookupToken, scopeAllows, dailyBudget, attachTokenMeter, T
 import { attachWebhook, checkWebhookUrl, JOB_WEBHOOK_URL, WEBHOOK_SECRET, WEBHOOK_ALLOWED_HOSTS } from "./webhook.js";
 import { authConfig, cookieSecret, makeCookieValue, verifyCookieValue, parseCookies, isHttps, setCookieHeader, clearCookieHeader, clientIp, LoginLimiter, loginPageHtml, safeNext, COOKIE_NAME } from "./auth.js";
 import { openStateDb, restoreState, attachStateDb, STATE_DB_FILE } from "./state-db.js";
-import { storageConfig, createStorage, attachStorage, putWithRetry } from "./storage.js";
+import { storageConfig, createStorage, attachStorage, putWithRetry, workspaceFiles } from "./storage.js";
 import { attachGitGate, prepareBranch, pushBranch, gitSettingsOf, branchUrl, gitInfo } from "./gitpush.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -454,9 +454,12 @@ if (storage) {
     outDirOf: (job) => getJobContext(job.id)?.outDir || null,
     tasksOf: (job) => job.taskIds.map((id) => state.tasks.get(id)).filter(Boolean),
     agentNameOf: (id) => state.agents.get(id)?.name || "",
-    onUploaded: async (job, { client, keyPrefix, dir }) => { // job.json บนดิสก์ถูกเขียนใหม่พร้อม storage แล้ว (writer ฟัง job.storage) → ส่งขึ้นอีกครั้งให้ตรงกัน
-      if (!dir || !job.storage?.uploaded) return;
-      const body = await fs.promises.readFile(path.join(dir, "job.json"));
+    onUploaded: async (job, { client, keyPrefix, dir }) => { // job.json ถูกสร้างใหม่พร้อม storage แล้ว → ส่งขึ้นอีกครั้งให้ตรงกัน (โปรเจกต์: อ่านจากดิสก์ที่ writer เขียนใหม่ · workspace: สร้างจากหน่วยความจำ)
+      if (!job.storage?.uploaded) return;
+      const body = dir
+        ? await fs.promises.readFile(path.join(dir, "job.json"))
+        : workspaceFiles(job, job.taskIds.map((id) => state.tasks.get(id)).filter(Boolean), { agentNameOf: (id) => state.agents.get(id)?.name || "" }).find((f) => f.rel === "job.json")?.body;
+      if (!body) return;
       await putWithRetry(client, `${keyPrefix}/job.json`, body, { contentType: "application/json; charset=utf-8", attempts: STORAGE.attempts, retryMs: STORAGE.retryMs });
     },
   });
