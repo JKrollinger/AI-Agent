@@ -1,0 +1,40 @@
+# docker compose up -d  — ศูนย์ควบคุม + (ไม่บังคับ) Cloudflare Tunnel (ดู docs/10-online.md §2.2)
+# ค่าลับทั้งหมดอ่านจากไฟล์ .env ข้าง ๆ (ไม่เข้า git): DASHBOARD_TOKEN, ANTHROPIC_API_KEY, S3_*, TUNNEL_TOKEN
+services:
+  grock:
+    build: .
+    image: grock-agent:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0           # ฟังทุก interface ในคอนเทนเนอร์ (ต้องมี DASHBOARD_TOKEN ใน .env ไม่งั้นไม่สตาร์ต)
+      PORT: 3789
+      GROCK_DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:3789:3789"  # เปิดเฉพาะ localhost ของเครื่อง host — ให้ tunnel/reverse proxy เป็นทางเข้าจากอินเทอร์เน็ต
+    volumes:
+      - grock-data:/app/data   # ทะเบียนโปรเจกต์ team.json token-usage.json state.db
+      - grock-logs:/app/logs   # events.jsonl
+      # โปรเจกต์ที่ให้ทีม AI ทำงาน (ลงทะเบียนด้วย node tools/grock.mjs init /projects/myshop --id myshop จากในคอนเทนเนอร์)
+      # - ./projects:/projects
+      # โมเดล 3 มิติ/ภาพใบหน้าที่ไม่อยู่ใน git (ดู docs/09-office3d.md)
+      # - ./public/office3d/models:/app/public/office3d/models:ro
+      # - ./public/office3d/portraits:/app/public/office3d/portraits:ro
+      # ให้ git push ใช้คีย์ SSH ของเครื่อง host (gitpush.js) — mount แบบอ่านอย่างเดียว
+      # - ~/.ssh:/home/node/.ssh:ro
+
+  # ทางเข้าจากอินเทอร์เน็ตด้วย Cloudflare Tunnel (named tunnel แบบโทเคน): ตั้ง TUNNEL_TOKEN ใน .env แล้ว docker compose --profile tunnel up -d
+  # และใส่โดเมนของ tunnel ใน ALLOWED_HOSTS ของ .env
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - grock
+
+volumes:
+  grock-data:
+  grock-logs:

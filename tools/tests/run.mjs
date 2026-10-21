@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const ALL = ["test-projects.mjs", "test-plan-rules.mjs", "test-review2.mjs", "test-apply.mjs", "test-hermes.mjs", "e2e-projects.mjs", "e2e-apply.mjs", "e2e-hermes.mjs"];
+const ALL = ["test-projects.mjs", "test-plan-rules.mjs", "test-review2.mjs", "test-apply.mjs", "test-hermes.mjs", "test-storage.mjs", "test-state-db.mjs", "test-auth.mjs", "e2e-projects.mjs", "e2e-apply.mjs", "e2e-hermes.mjs", "e2e-online.mjs"];
 const filter = process.argv.slice(2);
 const files = filter.length ? ALL.filter((f) => filter.some((x) => f.includes(x))) : ALL;
 const results = [];

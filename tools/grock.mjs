@@ -13,12 +13,14 @@
 //   node tools/grock.mjs apply <taskId> [--note "..."]                         อนุมัติ → git apply เข้าโปรเจกต์
 //   node tools/grock.mjs reject <taskId> [--reason "..."]                      ปฏิเสธ (ไม่แตะไฟล์)
 //
-// ตั้ง GROCK_URL ถ้าเซิร์ฟเวอร์ไม่ได้อยู่ที่ http://127.0.0.1:3789
+// ตั้ง GROCK_URL ถ้าเซิร์ฟเวอร์ไม่ได้อยู่ที่ http://127.0.0.1:3789 · ตั้ง GROCK_TOKEN (หรือ DASHBOARD_TOKEN) เมื่อเซิร์ฟเวอร์เปิด AUTH=token (ส่งเป็น Authorization: Bearer)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.GROCK_URL || "http://127.0.0.1:3789").replace(/\/+$/, "");
+const TOKEN = process.env.GROCK_TOKEN || process.env.DASHBOARD_TOKEN || ""; // โทเคนใน API_TOKENS (สิทธิ์ admin สำหรับ apply/reject) หรือ DASHBOARD_TOKEN ของแดชบอร์ด (AUTH=token)
+const AUTH_HEADERS = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {};
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -40,18 +42,18 @@ const die = (msg, code = 1) => { process.stderr.write(`✖ ${msg}\n`); process.e
 async function api(method, p, body) {
   let res;
   try {
-    res = await fetch(`${BASE}${p}`, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(`${BASE}${p}`, { method, headers: { "content-type": "application/json", ...AUTH_HEADERS }, body: body ? JSON.stringify(body) : undefined });
   } catch (err) {
     die(`ต่อเซิร์ฟเวอร์ ${BASE} ไม่ได้ (${err.cause?.code || err.message}) — เปิดศูนย์ควบคุมด้วย npm start ก่อน`);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) die(`${method} ${p} → ${res.status}: ${data.error || res.statusText}`);
+  if (!res.ok) die(`${method} ${p} → ${res.status}: ${data.error || res.statusText}${res.status === 401 ? " — เซิร์ฟเวอร์ต้องล็อกอิน: ตั้ง GROCK_TOKEN=<DASHBOARD_TOKEN หรือโทเคนใน API_TOKENS> ก่อนรัน" : ""}`);
   return data;
 }
 
 async function serverUp() {
   try {
-    const r = await fetch(`${BASE}/api/health`);
+    const r = await fetch(`${BASE}/api/health`, { headers: AUTH_HEADERS });
     return r.ok;
   } catch {
     return false;
@@ -77,7 +79,7 @@ async function follow(jobId) {
   for (let attempt = 0; attempt < 5; attempt++) {
     let res;
     try {
-      res = await fetch(`${BASE}/api/events`, { headers: lastId ? { "Last-Event-ID": String(lastId) } : {} });
+      res = await fetch(`${BASE}/api/events`, { headers: { ...AUTH_HEADERS, ...(lastId ? { "Last-Event-ID": String(lastId) } : {}) } });
     } catch {
       await new Promise((r) => setTimeout(r, 1500));
       continue;

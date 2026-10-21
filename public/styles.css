@@ -439,3 +439,22 @@ table.cfg tr.cfg-duty-row td { padding-top: 0; padding-bottom: 12px; border-bott
 .stream.diff .del { color: var(--bad); }
 .stream.diff .hk { color: var(--info); }
 .stream.diff .hd { color: var(--muted); }
+
+/* ---------- ออนไลน์: คลาวด์ (storage.js) + push branch (gitpush.js) + ล็อกอิน (auth.js) ---------- */
+.badge.logout { cursor: pointer; color: var(--muted); background: transparent; font: inherit; font-size: 11px; }
+.badge.logout:hover { color: var(--bad); border-color: rgba(255, 95, 109, 0.5); }
+.chip.cloud { color: var(--info); background: rgba(79, 163, 255, 0.12); }
+.chip.cloud.done { color: var(--ok); background: rgba(61, 213, 152, 0.12); }
+.chip.cloud.failed { color: var(--bad); background: rgba(255, 95, 109, 0.12); }
+.chip.cloud.running { animation: toolpulse 1.3s ease-in-out infinite; }
+.chip.git { color: var(--warn); background: rgba(255, 165, 82, 0.14); border: 1px solid rgba(255, 165, 82, 0.4); }
+.chip.git.pending { animation: toolpulse 1.3s ease-in-out infinite; }
+.chip.git.running { color: var(--info); border-color: rgba(79, 163, 255, 0.4); background: rgba(79, 163, 255, 0.12); }
+.chip.git.done { color: var(--ok); background: rgba(61, 213, 152, 0.12); border-color: rgba(61, 213, 152, 0.4); }
+.chip.git.failed { color: var(--bad); border-color: rgba(255, 95, 109, 0.4); background: rgba(255, 95, 109, 0.12); }
+.chip.git.muted { color: var(--muted); background: var(--card-2); border-color: var(--line); }
+.outdir a { color: var(--info); text-decoration: none; }
+.outdir a:hover { text-decoration: underline; }
+.outdir .r-sub { color: var(--muted); }
+.push-controls { flex-wrap: wrap; }
+.push-controls .note { flex: 1; min-width: 120px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card-2); color: var(--text); font: inherit; font-size: 11px; }

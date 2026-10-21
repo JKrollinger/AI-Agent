@@ -111,7 +111,10 @@ const act = (p, fn) => p.then(fn).catch((e) => toast(e.message, "bad"));
 function connect() {
   const es = new EventSource("/api/events");
   es.onopen = () => setConn(true);
-  es.onerror = () => setConn(false);
+  es.onerror = () => { // เซสชันหมดอายุ/ยังไม่ล็อกอิน (โหมด token) → /api/state ตอบ 401 พร้อม login → พาไปหน้า login แทนการต่อใหม่ไม่รู้จบ
+    setConn(false);
+    fetch("/api/state", { cache: "no-store" }).then((r) => { if (r.status === 401) return r.json().then((b) => { if (b.login) location.href = `${b.login}?next=${encodeURIComponent(location.pathname)}`; }); }).catch(() => {});
+  };
   es.onmessage = (e) => handle(JSON.parse(e.data));
 }
 function setConn(on) {
@@ -129,7 +132,8 @@ function handle(ev) {
   const d = ev.data || {};
   switch (ev.type) {
     case "snapshot":
-      S.mode = d.mode; S.settings = d.settings; S.totals = d.totals; S.projects = d.projects || [];
+      S.mode = d.mode; S.settings = d.settings; S.totals = d.totals; S.projects = d.projects || []; S.online = d.online || { auth: "none" };
+      $("#logoutBtn")?.classList.toggle("hidden", S.online.auth !== "token"); // ปุ่มออกจากระบบเฉพาะโหมดล็อกอินด้วยโทเคน (คุกกี้)
       S.agents = new Map(d.agents.map((a) => [a.id, a]));
       S.tasks = new Map(d.tasks.map((t) => [t.id, t]));
       S.jobs = new Map(d.jobs.map((j) => [j.id, j]));
@@ -209,6 +213,20 @@ function handle(ev) {
       upsertJob(d.job); mark("tasks", "results");
       if (!d.ok) toast(`📡 ส่ง webhook ของ "${trunc(d.job.goal, 40)}" ไม่สำเร็จ`, "bad");
       break;
+    case "job.storage": // ผลการเก็บผลงานขึ้นคลาวด์ (storage.js): ok = null กำลังอัปโหลด, true/false = จบแล้ว
+      upsertJob(d.job); mark("tasks", "results");
+      if (d.ok === true) toast(`☁️ เก็บผลงาน "${trunc(d.job.goal, 40)}" บนคลาวด์แล้ว (${d.job.storage?.files || 0} ไฟล์)`, "ok");
+      else if (d.ok === false) toast(`☁️ อัปโหลดผลงาน "${trunc(d.job.goal, 40)}" ไม่สำเร็จ: ${d.job.storage?.error || ""}`, "bad");
+      break;
+    case "job.git": { // push branch ขึ้น remote (gitpush.js): pending → รออนุมัติ, pushing, pushed, failed, rejected, skipped
+      upsertJob(d.job); mark("tasks", "results", "kpis");
+      const g = d.job.git || {};
+      if (d.action === "pending") toast(`📤 ผลงาน "${trunc(d.job.goal, 36)}" พร้อม push เป็น ${g.branch} — เปิดแท็บผลงานเพื่ออนุมัติ`, "warn");
+      else if (d.action === "pushed") toast(`✅ push ${g.branch} ไป ${g.remote} แล้ว`, "ok");
+      else if (d.action === "failed") toast(`❌ push ${g.branch} ไม่สำเร็จ: ${g.error || ""}`, "bad");
+      else if (d.action === "skipped") toast(`📤 push ไม่ได้: ${g.error || ""}`, "warn");
+      break;
+    }
     case "metrics.updated":
       S.totals = d.totals;
       for (const m of d.agents) { const a = S.agents.get(m.id); if (a) { a.metrics = m.metrics; a.computed = m.computed; } }
@@ -286,7 +304,8 @@ function renderKpis() {
   $("#kpis").innerHTML = items.map(([v, l]) => `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${l}</div></div>`).join("");
   const pend = pendingPatches();
   $("#cntTasks").innerHTML = (S.tasks.size ? `(${S.tasks.size})` : "") + (pend ? ` <span class="pending-badge" title="patch ของ Developer ที่รอคุณอนุมัติ">🩹${pend}</span>` : "");
-  $("#cntResults").textContent = [...S.jobs.values()].filter((j) => j.status === "done").length || "";
+  const pushes = pendingPushes();
+  $("#cntResults").innerHTML = ([...S.jobs.values()].filter((j) => j.status === "done").length || "") + (pushes ? ` <span class="pending-badge" title="ผลงานที่รอคุณอนุมัติ push ขึ้น remote">📤${pushes}</span>` : "");
 }
 
 function taskCard(t, compact = false) {
@@ -317,8 +336,50 @@ function originChips(j) {
   if (j.requestedBy) parts.push(`<span class="chip src" title="ผู้ขอ">👤 ${esc(j.requestedBy)}</span>`);
   if (j.planSource === "external") parts.push(`<span class="chip src" title="แผนงานถูกส่งมาพร้อมโจทย์ กัปตันตรวจและเติม QA">📋 แผนจากภายนอก</span>`);
   if (j.webhook) parts.push(`<span class="chip ${j.webhook.status === "sent" ? "done" : j.webhook.status === "failed" ? "failed" : "running"}" title="${esc(j.webhook.url)}${j.webhook.error ? ` — ${esc(j.webhook.error)}` : ""}">📡 ${j.webhook.status === "sent" ? "แจ้งผลแล้ว" : j.webhook.status === "failed" ? "แจ้งผลไม่สำเร็จ" : "กำลังแจ้งผล"}</span>`);
-  return parts.length ? ` · ${parts.join(" ")}` : "";
+  if (j.restored?.from && j.restored.from !== "done") parts.push(`<span class="chip src" title="โจทย์นี้ถูกโหลดกลับมาจากฐานข้อมูลหลังรีสตาร์ต (สถานะเดิม: ${esc(j.restored.from)})">💾 หลังรีสตาร์ต</span>`);
+  parts.push(storageChip(j), gitChip(j));
+  const list = parts.filter(Boolean);
+  return list.length ? ` · ${list.join(" ")}` : "";
 }
+// ---------- คลาวด์ (storage.js) + push branch (gitpush.js) ----------
+const STORAGE_TH = { uploading: "กำลังอัปโหลดขึ้นคลาวด์…", uploaded: "เก็บบนคลาวด์แล้ว", failed: "อัปโหลดคลาวด์ไม่สำเร็จ" };
+function storageChip(j) {
+  const s = j.storage; if (!s) return "";
+  const cls = s.status === "uploaded" ? "done" : s.status === "failed" ? "failed" : "running";
+  const title = `${esc(s.bucket || "")}/${esc(s.keyPrefix || "")}${s.files ? ` · ${s.files} ไฟล์ ${(s.bytes / 1024).toFixed(1)} KB` : ""}${s.error ? ` — ${esc(s.error)}` : ""}`;
+  return `<span class="chip cloud ${cls}" title="${title}">☁️ ${STORAGE_TH[s.status] || esc(s.status)}</span>`;
+}
+const GIT_TH = { pending: "รออนุมัติ push", pushing: "กำลัง push…", pushed: "push แล้ว", failed: "push ไม่สำเร็จ", rejected: "ไม่ push", skipped: "push ไม่ได้" };
+function gitChip(j) {
+  const g = j.git; if (!g) return "";
+  const cls = g.status === "pushed" ? "done" : g.status === "failed" ? "failed" : g.status === "pending" ? "pending" : g.status === "pushing" ? "running" : "muted";
+  const title = `${esc(g.branch)} → ${esc(g.remote)}${g.remoteHost ? ` (${esc(g.remoteHost)})` : ""}${g.commit ? ` · ${esc(g.commit.slice(0, 7))}` : ""}${g.error ? ` — ${esc(g.error)}` : ""}`;
+  return `<span class="chip git ${cls}" title="${title}">📤 ${GIT_TH[g.status] || esc(g.status)}</span>`;
+}
+/** ส่วนคลาวด์/push ของการ์ดผลงาน: ลิงก์บนคลาวด์ + ปุ่มอนุมัติ push */
+function onlineSection(j) {
+  const rows = [];
+  const s = j.storage;
+  if (s) {
+    if (s.status === "uploaded") rows.push(`<div class="outdir">☁️ <a href="${esc(s.url)}" target="_blank" rel="noopener" title="เปิดได้เมื่อ bucket เป็นสาธารณะหรือตั้ง S3_PUBLIC_URL">${esc(s.bucket)}/${esc(s.keyPrefix)}/</a> <span class="r-sub">${s.files} ไฟล์ · ${(s.bytes / 1024).toFixed(1)} KB${(s.skipped || []).length ? ` · ข้าม ${s.skipped.length}` : ""}</span> <button class="btn small ghost" data-copytext="${esc(s.resultUrl || s.url)}">คัดลอกลิงก์ result.md</button></div>`);
+    else if (s.status === "failed") rows.push(`<div class="outdir" style="color:var(--bad)">☁️ ${esc(s.error || "อัปโหลดไม่สำเร็จ")}</div>`);
+    else rows.push(`<div class="outdir">☁️ กำลังอัปโหลดขึ้น ${esc(s.bucket)}/${esc(s.keyPrefix)}/ …</div>`);
+  }
+  const g = j.git;
+  if (g) {
+    const where = `${esc(g.branch)} → ${esc(g.remote)}${g.remoteHost ? ` (${esc(g.remoteHost)})` : ""}`;
+    if (g.status === "pending" || g.status === "failed") rows.push(`<div class="outdir push-controls" data-push-box="${j.id}">📤 ${where}${g.status === "failed" ? ` <span style="color:var(--bad)">— ${esc(g.error || "ไม่สำเร็จ")}</span>` : ""}
+      <input type="text" class="note" placeholder="หมายเหตุ (ไม่บังคับ)" />
+      <button class="btn small ok" data-push="${j.id}">📤 ${g.status === "failed" ? "ลอง push ใหม่" : `Push ไป ${esc(g.remote)}`}</button>
+      <button class="btn small danger" data-nopush="${j.id}">✖ ไม่ push</button></div>`);
+    else if (g.status === "pushed") rows.push(`<div class="outdir">📤 ${g.url ? `<a href="${esc(g.url)}" target="_blank" rel="noopener">${where}</a>` : where} <span class="r-sub">${esc((g.commit || "").slice(0, 7))} · ${g.mode === "patch" ? "HEAD + patch + ผลงาน" : "เฉพาะผลงาน"}</span> <button class="btn small ghost" data-copytext="${esc(g.url || g.branch)}">คัดลอก</button></div>`);
+    else if (g.status === "pushing") rows.push(`<div class="outdir">📤 กำลัง push ${where} …</div>`);
+    else if (g.status === "rejected") rows.push(`<div class="outdir">📤 ไม่ push ${where}${g.note ? ` — ${esc(g.note)}` : ""}</div>`);
+    else if (g.status === "skipped") rows.push(`<div class="outdir" style="color:var(--warn)">📤 push ไม่ได้: ${esc(g.error || "")}</div>`);
+  }
+  return rows.join("");
+}
+const pendingPushes = () => [...S.jobs.values()].filter((j) => j.git?.status === "pending").length;
 
 function renderTasks() {
   const root = $("#tab-tasks");
@@ -399,6 +460,7 @@ function renderResults() {
         <div class="meta" style="padding:0 12px 10px;color:var(--muted);font-size:11px">${fmtMs(j.durationMs)} · ${fmtUsd(j.costUsd)} · ${j.taskIds.length} งานย่อย${originChips(j)}
           <button class="btn small ghost" data-copy="${j.id}" style="margin-left:8px">คัดลอกผลลัพธ์</button></div>
         ${j.outputDir ? `<div class="outdir">📁 ${esc(j.outputDir)} <button class="btn small ghost" data-copytext="${esc(j.outputDir)}">คัดลอกพาธ</button></div>` : ""}
+        ${onlineSection(j)}
         ${S.expandedResults.has(j.id) ? `<pre>${esc(j.result || "(ไม่มีผลลัพธ์)")}</pre>` : ""}
       </div>`).join("")
     : `<div class="empty">ยังไม่มีผลงานที่เสร็จ</div>`;
@@ -874,7 +936,15 @@ document.addEventListener("click", (e) => {
   if (jobHead) { const id = jobHead.dataset.job; S.collapsed.has(id) ? S.collapsed.delete(id) : S.collapsed.add(id); return renderTasks(); }
   const resHead = el.closest("[data-result]");
   if (resHead) { const id = resHead.dataset.result; S.expandedResults.has(id) ? S.expandedResults.delete(id) : S.expandedResults.add(id); return renderResults(); }
-  if (el.dataset.copytext) { navigator.clipboard?.writeText(el.dataset.copytext).then(() => toast("คัดลอกพาธแล้ว", "ok")); return; }
+  if (el.dataset.copytext) { navigator.clipboard?.writeText(el.dataset.copytext).then(() => toast("คัดลอกแล้ว", "ok")); return; }
+  if (el.dataset.push || el.dataset.nopush) { // ด่านอนุมัติ push ผลงานเป็น branch grock/<jobId> (ผลลัพธ์มาทาง event job.git)
+    const id = el.dataset.push || el.dataset.nopush;
+    const note = el.closest("[data-push-box]")?.querySelector(".note")?.value.trim() || "";
+    el.disabled = true;
+    const p = el.dataset.push ? api(`/api/jobs/${id}/push`, { note }) : api(`/api/jobs/${id}/push/reject`, { reason: note });
+    return act(p.finally(() => { el.disabled = false; }), () => {});
+  }
+  if (el.closest("#logoutBtn")) { fetch("/logout", { method: "POST", headers: { accept: "application/json" } }).finally(() => { location.href = "/login"; }); return; }
   if (el.dataset.copy) { const j = S.jobs.get(el.dataset.copy); navigator.clipboard?.writeText(j?.result || "").then(() => toast("คัดลอกผลลัพธ์แล้ว", "ok")); return; }
   const rosterRow = el.closest(".roster-row");
   if (rosterRow) return focusAgent(rosterRow.dataset.agent);

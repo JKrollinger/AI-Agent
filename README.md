@@ -131,13 +131,31 @@ npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิ�
 
 คำขอจากภายนอกลงทะเบียนโปรเจกต์ใหม่ไม่ได้ (ทำที่เครื่องเท่านั้น) ใช้โดเมนของตัวเอง, รันเป็น Windows service, เพิ่มชั้นล็อกอิน Cloudflare Access และข้อควรระวัง: [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md)
 
+### ใช้งานออนไลน์เต็มรูปแบบ: ล็อกอินด้วยโทเคน · ผลงานขึ้นคลาวด์ · สถานะถาวร · branch ขึ้น GitHub
+
+```ini
+AUTH=token
+DASHBOARD_TOKEN=<node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))">   # หน้า /login → คุกกี้ HttpOnly หรือ Authorization: Bearer
+STORAGE_PROVIDER=s3            # Cloudflare R2 / S3 / MinIO — ผลงานทุกโจทย์ขึ้น <S3_PREFIX>/<projectId>/<jobId>/ (ลองใหม่ 3 ครั้ง ไม่บล็อกทีม)
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_BUCKET=grock-results
+S3_ACCESS_KEY_ID=…
+S3_SECRET_ACCESS_KEY=…
+```
+
+- **ล็อกอิน** (`server/auth.js`): ทุกหน้า/API/SSE ต้องมีคุกกี้จากหน้า `/login` หรือ Bearer `DASHBOARD_TOKEN`; เดาผิดเกิน `LOGIN_MAX_FAILS` ต่อ IP → 429; `HOST` ไม่ใช่ localhost หรือมี `ALLOWED_HOSTS` โดยไม่มีล็อกอิน → **ไม่ยอมสตาร์ต**; Basic Auth เดิมยังใช้ได้
+- **ผลงานบนคลาวด์** (`server/storage.js`): SigV4 เขียนเองด้วย `node:crypto` (ไม่เพิ่ม dependency) ผลอยู่ใน `job.json` → `storage: { uploaded, url, error }` และชิป ☁️ + ลิงก์บนแท็บผลงาน; โจทย์ไม่มีโปรเจกต์ขึ้นใต้ `workspace/`
+- **สถานะถาวร** (`server/state-db.js`): SQLite `data/state.db` (node:sqlite) write-through — รีสตาร์ตแล้วโจทย์เก่า/ผลงาน/ตัวชี้วัดยังอยู่ โจทย์ที่ค้างถูกทำเครื่องหมายล้มเหลวพร้อมเหตุผล
+- **โค้ดขึ้น GitHub** (`server/gitpush.js`): โปรเจกต์ที่ตั้ง `"git": { "pushBranch": true, "remote": "origin" }` ใน `.grock/project.json` → โจทย์เสร็จแล้วรอคุณกด **Push** บนแท็บผลงาน → branch `grock/<jobId>` (เฉพาะไฟล์ผลงาน หรือ HEAD + patch ที่อนุมัติแล้ว) push ด้วย git ของเครื่อง ไม่เก็บโทเคน
+- รันบน VPS/Railway ด้วย `Dockerfile` + `docker-compose.yml` (volume `/app/data`) — ทั้งหมดใน [docs/10-online.md](docs/10-online.md)
+
 ## สั่งงานทาง Telegram ผ่าน Hermes Agent
 
 ให้ [Hermes Agent](https://github.com/NousResearch/hermes-agent) เป็น "ผู้จัดการใหญ่": คุณสั่งใน Telegram → Hermes ส่งโจทย์ (พร้อมแผนก็ได้) เข้าศูนย์ควบคุมผ่าน MCP server (`npm run mcp`, `tools/mcp-server.mjs`) ด้วยโทเคนสิทธิ์จำกัด (`API_TOKENS=hermes:โทเคน:jobs`) → ทีมทำงาน กัปตันเลือกคน/QA/รวมผล → โจทย์เสร็จแล้วศูนย์ควบคุมยิง webhook (`JOB_WEBHOOK_URL`, ลายเซ็น HMAC `WEBHOOK_SECRET`) กลับ Hermes → สรุปเข้า Telegram งบรายวันต่อโทเคน `TOKEN_DAILY_USD` (ค่าเริ่มต้น $5) ไม่ใช้ Hermes ก็มี `npm run telegram` (บอทต่อตรง) ขั้นตอนทั้งหมด: [docs/11-hermes.md](docs/11-hermes.md)
 
 ## REST API (ใช้ต่อกับระบบอื่นได้)
 
-การยืนยันตัว: HTTP Basic Auth (`AUTH_USER`/`AUTH_PASSWORD`) หรือ `Authorization: Bearer <โทเคน>` จาก `API_TOKENS=ชื่อ:โทเคน:สิทธิ์` (สิทธิ์ `jobs` = สั่ง/ดูโจทย์ + `/api/state` `/api/projects` `/api/projects/:id/context` `/api/agents` เท่านั้น, `admin` = ทุกอย่าง; บังคับแม้เรียกจาก localhost)
+การยืนยันตัว: คุกกี้จากหน้า `/login` หรือ `Authorization: Bearer <DASHBOARD_TOKEN>` (โหมด `AUTH=token`), HTTP Basic Auth (`AUTH_USER`/`AUTH_PASSWORD`) หรือ `Authorization: Bearer <โทเคน>` จาก `API_TOKENS=ชื่อ:โทเคน:สิทธิ์` (สิทธิ์ `jobs` = สั่ง/ดูโจทย์ + `/api/state` `/api/projects` `/api/projects/:id/context` `/api/agents` เท่านั้น, `admin` = ทุกอย่าง; บังคับแม้เรียกจาก localhost)
 
 | Method | Path | ใช้ทำอะไร |
 |---|---|---|
@@ -153,6 +171,8 @@ npm run tunnel   # = cloudflared tunnel --url http://127.0.0.1:3789 → พิ�
 | POST | `/api/tasks/:id/handoff` `{agentId, reason}` | ส่งต่องาน |
 | POST | `/api/tasks/:id/retry` · `/cancel` | ทำใหม่ / ยกเลิก |
 | POST | `/api/tasks/:id/apply` `{note}` · `/reject` `{reason}` | อนุมัติ (git apply --check → เขียนไฟล์จริง) / ปฏิเสธ patch ของ Developer |
+| POST | `/api/jobs/:id/push` `{note}` · `/push/reject` `{reason}` | อนุมัติ push ผลงานเป็น branch `grock/<jobId>` ไป remote ของโปรเจกต์ (202, ผลมาทาง event `job.git`) / ไม่ push — สิทธิ์ `admin` เท่านั้น — [docs/10-online](docs/10-online.md) |
+| GET/POST | `/login` · POST `/logout` | หน้าล็อกอินโหมด `AUTH=token` (ฟอร์มหรือ JSON `{token}` → คุกกี้ `grock_session`) / ลบคุกกี้ |
 | GET | `/api/tasks/:id/patch` | diff ฉบับเต็มของ patch |
 | POST | `/api/agents/:id/pause` · `/resume` | หยุด / ให้กลับมาทำงาน |
 | POST | `/api/agents/:id/config` `{name, nick, duties, model, effort, toolsEnabled}` | ตั้งค่าต่อคน (หน้าที่/โมเดล/ความลึก/เครื่องมือ) บันทึกลง `data/team.json` |
@@ -179,5 +199,6 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
 - [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo
+- [docs/10-online.md](docs/10-online.md) — ใช้งานออนไลน์: ผลงานขึ้นคลาวด์ (R2/S3 ผ่าน SigV4 ไม่เพิ่ม dependency), ล็อกอิน `AUTH=token` + หน้า `/login` + rate limit, สถานะถาวร SQLite (`data/state.db`), branch `grock/<jobId>` ขึ้น GitHub พร้อมด่านอนุมัติ, ตาราง "ชนิดข้อมูล → ที่เก็บ", Dockerfile/docker-compose, ข้อควรระวังเรื่องคีย์
 - [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md) — เปิดใช้งานจากอินเทอร์เน็ตด้วย Cloudflare Tunnel: รหัสผ่าน, `ALLOWED_HOSTS`, quick/named tunnel, Windows service, Cloudflare Access
 - [docs/11-hermes.md](docs/11-hermes.md) — สั่งงานทาง Telegram ผ่าน Hermes Agent: โทเคนสิทธิ์จำกัด + งบรายวัน, แผนจากภายนอก, webhook แจ้งผล + ลายเซ็น, MCP server, ฝั่ง Hermes สองทาง (เสริมตัวเดิมด้วย MCP + ทักษะ `tools/hermes/skills/grock-workforce` / โปรไฟล์แยก), webhook route, cron, บอท Telegram ต่อตรง

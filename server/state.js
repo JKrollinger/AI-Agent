@@ -9,6 +9,7 @@ export const uid = (prefix) => `${prefix}-${Date.now().toString(36)}-${(++counte
 export const state = {
   mode: "sim", // sim | live  (ตั้งใน index.js หลังตรวจ credentials)
   startedAt: Date.now(),
+  online: { auth: "none", storage: null, stateDb: false }, // สรุปการตั้งค่าออนไลน์ให้แดชบอร์ด (ตั้งใน index.js): auth = token|basic|none, storage = ชื่อ bucket หรือ null
   settings: {
     speed: 1, // ตัวคูณความเร็วโหมดจำลอง
     autoAssign: true, // กัปตันมอบหมายงานอัตโนมัติ
@@ -84,6 +85,8 @@ export function createJob(goal, { project = null, files = [], source = "local", 
     requestedBy, // ข้อความอิสระจากผู้เรียก เช่น "telegram:@somchai" (แสดงบนการ์ดงาน/ผลงาน)
     webhookUrl, // ปลายทางแจ้งผลเฉพาะโจทย์นี้ (ตรวจ host แล้ว) หรือ null = ใช้ JOB_WEBHOOK_URL
     webhook: null, // ผลการส่ง webhook { url, status: sending|sent|failed, httpStatus, attempts, error, at }
+    storage: null, // ผลการเก็บผลงานขึ้นคลาวด์ (storage.js) { status: uploading|uploaded|failed, uploaded, url, resultUrl, files, bytes, error, at }
+    git: null, // ผลการส่งผลงานเป็น branch grock/<jobId> (gitpush.js) { status: pending|pushing|pushed|failed|rejected|skipped, branch, remote, commit, url, error, at }
     plan, // แผนจากภายนอกที่ตรวจแล้ว (ใช้ตอนวางแผนแล้วล้างทิ้ง)
     planSource: plan ? "external" : "captain", // ใครวางแผน: กัปตัน หรือผู้ส่งโจทย์
     error: null, // สาเหตุที่ล้มเหลว (ส่งต่อใน webhook/ผลลัพธ์)
@@ -137,6 +140,7 @@ export function snapshot() {
     costUsd: agents.reduce((s, a) => s + a.metrics.costUsd, 0),
     toolCalls: agents.reduce((s, a) => s + (a.metrics.toolCalls || 0), 0),
     pendingPatches: tasks.filter((t) => t.patch?.status === "pending").length, // งานแก้ไฟล์จริงที่รอผู้ควบคุมอนุมัติ
+    pendingPushes: jobs.filter((j) => j.git?.status === "pending").length, // โจทย์ที่รออนุมัติ push branch ขึ้น remote
     workersBusy: agents.filter((a) => a.role !== "captain" && a.status === "working").length,
     workersTotal: agents.filter((a) => a.role !== "captain").length,
     jobsDone: jobs.filter((j) => j.status === "done").length,
@@ -144,6 +148,7 @@ export function snapshot() {
   return {
     mode: state.mode,
     startedAt: state.startedAt,
+    online: state.online,
     settings: state.settings,
     allowedModels: ALLOWED_MODELS,
     projects: listProjects(),

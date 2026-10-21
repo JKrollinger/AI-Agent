@@ -46,7 +46,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   budget: { maxUsdPerJob: null }, // null = ไม่ได้ตั้ง (ใช้ env MAX_USD_PER_JOB), 0 = ไม่จำกัดชัดเจน (ตรวจจาก usage จริงทุกครั้งที่มอบหมายงาน)
   output: { dir: ".grock/out" },
   cache: { ttl: "5m" },
+  // ส่งผลงานขึ้น remote เป็น branch grock/<jobId> ด้วย git CLI ของเครื่อง (gitpush.js) — ปิดเป็นค่าเริ่มต้น และต้องกดอนุมัติบนแดชบอร์ดก่อน push ทุกครั้ง
+  git: { pushBranch: false, remote: "origin" },
 });
+const GIT_REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const DEFAULT_TREE_IGNORE = [
   "node_modules", ".git", ".svn", ".hg", "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".turbo", ".cache",
@@ -444,6 +447,14 @@ function normalizeConfig(raw, warnings) {
   const qa = c.qa && typeof c.qa === "object" ? c.qa : {};
   const budget = c.budget && typeof c.budget === "object" ? c.budget : {};
   const output = c.output && typeof c.output === "object" ? c.output : {};
+  const gitRaw = c.git && typeof c.git === "object" && !Array.isArray(c.git) ? c.git : {};
+  if (c.git !== undefined && (!c.git || typeof c.git !== "object" || Array.isArray(c.git))) warnings.push('git ต้องเป็น object { "pushBranch": true, "remote": "origin" } — ข้าม');
+  let gitRemote = DEFAULT_CONFIG.git.remote;
+  if (gitRaw.remote !== undefined) {
+    if (typeof gitRaw.remote === "string" && GIT_REMOTE_RE.test(gitRaw.remote)) gitRemote = gitRaw.remote;
+    else warnings.push(`git.remote "${stripCtl(String(gitRaw.remote)).slice(0, 40)}" ต้องเป็นชื่อ remote (a-z 0-9 . _ -) — ใช้ origin`);
+  }
+  for (const k of Object.keys(gitRaw)) if (k !== "pushBranch" && k !== "remote") warnings.push(`git: ไม่รู้จักคีย์ "${stripCtl(k).slice(0, 60)}" — ข้าม`);
   const roles = {};
   for (const [role, v] of Object.entries(c.roles && typeof c.roles === "object" ? c.roles : {})) {
     if (!ROLES[role]) { warnings.push(`roles.${stripCtl(role).slice(0, 40)}: ไม่มีตำแหน่งนี้ — ข้าม`); continue; }
@@ -490,6 +501,7 @@ function normalizeConfig(raw, warnings) {
     budget: { maxUsdPerJob: budget.maxUsdPerJob === undefined || budget.maxUsdPerJob === null ? null : Number.isFinite(Number(budget.maxUsdPerJob)) && Number(budget.maxUsdPerJob) >= 0 ? Number(budget.maxUsdPerJob) : null },
     output: { dir: outDirOk ? outDir : DEFAULT_CONFIG.output.dir },
     cache: { ttl: c.cache?.ttl === "1h" ? "1h" : "5m" },
+    git: { pushBranch: gitRaw.pushBranch === true, remote: gitRemote },
   };
 }
 
@@ -817,6 +829,10 @@ function jobJson(ctx, job) {
       planSource: job.planSource || "captain", // captain | external (แผนส่งมากับโจทย์)
       error: job.error || null,
       webhook: job.webhook ? { url: job.webhook.url, status: job.webhook.status, httpStatus: job.webhook.httpStatus, attempts: job.webhook.attempts } : null,
+      // ผลการเก็บขึ้นคลาวด์ (storage.js): { uploaded, url, error, ... } — อัปเดตหลังอัปโหลดเสร็จ (job.json บนคลาวด์ถูกส่งซ้ำอีกครั้งให้ตรงกัน)
+      storage: job.storage ? { uploaded: Boolean(job.storage.uploaded), status: job.storage.status, url: job.storage.url || null, resultUrl: job.storage.resultUrl || null, bucket: job.storage.bucket || null, keyPrefix: job.storage.keyPrefix || null, files: job.storage.files || 0, bytes: job.storage.bytes || 0, skipped: job.storage.skipped || [], error: job.storage.error || null, at: job.storage.at ? fmtTs(job.storage.at) : null } : null,
+      // ผลการส่งขึ้น remote เป็น branch (gitpush.js): { status: pending|pushing|pushed|failed|rejected|skipped, branch, remote, commit, url, error }
+      git: job.git ? { status: job.git.status, branch: job.git.branch, remote: job.git.remote, commit: job.git.commit || null, url: job.git.url || null, mode: job.git.mode || null, error: job.git.error || null, decidedBy: job.git.decidedBy || null, at: job.git.at ? fmtTs(job.git.at) : null } : null,
       createdAt: fmtTs(job.createdAt),
       finishedAt: job.finishedAt ? fmtTs(job.finishedAt) : null,
       costUsd: job.costUsd || 0,
@@ -890,6 +906,10 @@ export function attachWriter(bus, { agentNameOf = () => "" } = {}) { // agentNam
         const md = resultMarkdown(ctx, job);
         writeFileAtomic(path.join(ctx.outDir, "result.md"), md);
         writeFileAtomic(path.join(path.dirname(ctx.outDir), "latest.md"), md);
+      } else if (ev.type === "job.storage" || ev.type === "job.git" || ev.type === "job.webhook") { // ผลอัปโหลดคลาวด์ / push branch / webhook → job.json ให้ตรงสถานะล่าสุด
+        const job = d.job; const ctx = getJobContext(job?.id); if (!ctx) return;
+        ctx.job = job;
+        writeFileAtomic(path.join(ctx.outDir, "job.json"), jobJson(ctx, job));
       }
     } catch (err) {
       console.warn(`⚠️ เขียนผลงานกลับเข้าโปรเจกต์ไม่สำเร็จ: ${err.message}`);

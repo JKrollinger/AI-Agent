@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $envFile) {
     $json = & node -e $js $envFile
     if ($LASTEXITCODE -ne 0 -or -not $json) { throw "node คืน exit code $LASTEXITCODE" }
     $obj = $json | ConvertFrom-Json
-    foreach ($k in "PORT", "HOST", "AUTH_USER", "AUTH_PASSWORD") { $dotenv[$k] = [string]$obj.$k }
+    foreach ($k in "PORT", "HOST", "AUTH_USER", "AUTH_PASSWORD", "DASHBOARD_TOKEN") { $dotenv[$k] = [string]$obj.$k }
   } catch { Fail 1 "อ่าน .env ไม่ได้: $($_.Exception.Message)" }
 }
 $port = 3789
@@ -50,7 +50,10 @@ $urlHost = if ($bindHost.Contains(":")) { "[$bindHost]" } else { $bindHost }
 $healthUrl = "http://${urlHost}:${port}/api/health"
 $authUser = if ($dotenv.AUTH_USER) { $dotenv.AUTH_USER } else { "admin" }
 $headers = @{}
-if ($dotenv.AUTH_PASSWORD) {
+if ($dotenv.DASHBOARD_TOKEN) {
+  # AUTH=token (docs/10-online.md): /api/health รับ Authorization: Bearer <DASHBOARD_TOKEN>
+  $headers["Authorization"] = "Bearer " + $dotenv.DASHBOARD_TOKEN
+} elseif ($dotenv.AUTH_PASSWORD) {
   $headers["Authorization"] = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($authUser):$($dotenv.AUTH_PASSWORD)"))
 }
 
@@ -155,7 +158,7 @@ while ((Get-Date) -lt $deadline) {
   } catch {
     $code = $null
     try { $code = [int]$_.Exception.Response.StatusCode } catch {}
-    if ($code -eq 401) { $lastErr = "HTTP 401 — เซิร์ฟเวอร์ขึ้นแล้วแต่ไม่รับ AUTH_USER/AUTH_PASSWORD ที่อ่านจาก .env"; break }
+    if ($code -eq 401) { $lastErr = "HTTP 401 — เซิร์ฟเวอร์ขึ้นแล้วแต่ไม่รับ DASHBOARD_TOKEN / AUTH_USER+AUTH_PASSWORD ที่อ่านจาก .env"; break }
     $lastErr = if ($code) { "HTTP $code" } else { $_.Exception.Message }
   }
   $taskState = (Get-ScheduledTask -TaskName $TaskName).State
