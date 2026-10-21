@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // grock.mjs — สั่งงานทีม AI (AI Workforce Control Center) ให้โปรเจกต์อื่นจากบรรทัดคำสั่ง (ไม่มี dependency)
 //
-//   node tools/grock.mjs init <โฟลเดอร์โปรเจกต์> [--id myshop] [--name "ชื่อ"]   สร้าง .grock/ + ลงทะเบียน
+//   node tools/grock.mjs templates                                             รายการแม่แบบ .grock/ ต่อประเภทโปรเจกต์
+//   node tools/grock.mjs init <โฟลเดอร์โปรเจกต์> [--template webapp] [--id myshop] [--name "ชื่อ"]   สร้าง .grock/ + ลงทะเบียน
+//   node tools/grock.mjs doctor <id|.>                                         ตรวจว่า .grock/ พร้อมสั่งงานหรือยัง (ไม่ต้องเปิดเซิร์ฟเวอร์)
 //   node tools/grock.mjs projects                                              รายชื่อโปรเจกต์ที่ลงทะเบียน
 //   node tools/grock.mjs context <id> [--role coder] [--tokens] [--full]        ดูว่าเอเจนต์จะเห็นอะไร (ใช้ได้ในโหมด sim)
 //   node tools/grock.mjs run "<โจทย์>" --project <id|.> [--files a.md,b.ts] [--wait]
@@ -16,7 +18,7 @@
 // ตั้ง GROCK_URL ถ้าเซิร์ฟเวอร์ไม่ได้อยู่ที่ http://127.0.0.1:3789 · ตั้ง GROCK_TOKEN (หรือ DASHBOARD_TOKEN) เมื่อเซิร์ฟเวอร์เปิด AUTH=token (ส่งเป็น Authorization: Bearer)
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const BASE = (process.env.GROCK_URL || "http://127.0.0.1:3789").replace(/\/+$/, "");
 const TOKEN = process.env.GROCK_TOKEN || process.env.DASHBOARD_TOKEN || ""; // โทเคนใน API_TOKENS (สิทธิ์ admin สำหรับ apply/reject) หรือ DASHBOARD_TOKEN ของแดชบอร์ด (AUTH=token)
@@ -39,6 +41,13 @@ for (let i = 1; i < argv.length; i++) {
 const out = (s = "") => process.stdout.write(`${String(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")}\n`);
 const die = (msg, code = 1) => { process.stderr.write(`✖ ${msg}\n`); process.exit(code); };
 
+/** โมดูล Project Pack ของศูนย์ควบคุม (ใช้ตรงโดยไม่ผ่านเซิร์ฟเวอร์: init / templates / doctor) */
+let projectsMod = null;
+async function projectsModule() {
+  if (!projectsMod) projectsMod = await import(pathToFileURL(path.join(here, "..", "server", "projects.js")).href);
+  return projectsMod;
+}
+
 async function api(method, p, body) {
   let res;
   try {
@@ -60,12 +69,26 @@ async function serverUp() {
   }
 }
 
+const cwdKey = () => fs.realpathSync.native(process.cwd()).replace(/\\/g, "/").toLowerCase();
+const initHint = () => `node "${path.join(here, "grock.mjs")}" init "${process.cwd()}" --id <id> [--template <ชื่อ>]`;
+
 async function resolveProjectId(idOrDot) {
   if (!idOrDot || idOrDot === ".") {
-    const cwd = fs.realpathSync.native(process.cwd()).replace(/\\/g, "/").toLowerCase();
+    const cwd = cwdKey();
     const { projects } = await api("GET", "/api/projects");
     const hit = projects.find((p) => String(p.root || "").replace(/\\/g, "/").toLowerCase() === cwd);
-    if (!hit) die(`โฟลเดอร์ปัจจุบันยังไม่ได้ลงทะเบียนเป็นโปรเจกต์ — รัน: node "${path.join(here, "grock.mjs")}" init "${process.cwd()}" --id <id>`);
+    if (!hit) die(`โฟลเดอร์ปัจจุบันยังไม่ได้ลงทะเบียนเป็นโปรเจกต์ — รัน: ${initHint()}`);
+    return hit.id;
+  }
+  return idOrDot;
+}
+
+/** เหมือน resolveProjectId แต่อ่านทะเบียนจากดิสก์โดยตรง (ไม่ต้องเปิดเซิร์ฟเวอร์) */
+function resolveProjectIdOffline(P, idOrDot) {
+  if (!idOrDot || idOrDot === ".") {
+    const cwd = cwdKey();
+    const hit = P.listProjects().find((p) => String(p.root || "").replace(/\\/g, "/").toLowerCase() === cwd);
+    if (!hit) die(`โฟลเดอร์ปัจจุบันยังไม่ได้ลงทะเบียนเป็นโปรเจกต์ — รัน: ${initHint()}`);
     return hit.id;
   }
   return idOrDot;
@@ -163,19 +186,53 @@ async function printPending(jobId) {
   } catch {}
 }
 
+const DOCTOR_ICON = { warn: "⚠", info: "ℹ", ok: "✔" };
+
 async function main() {
   switch (cmd) {
+    case "templates": {
+      const P = await projectsModule();
+      const list = P.listTemplates();
+      out("แม่แบบ .grock/ ต่อประเภทโปรเจกต์ — ใช้: init <โฟลเดอร์> --template <ชื่อ>");
+      for (const t of list) {
+        out("");
+        out(`${t.id.padEnd(10)} ${t.title}${t.id === P.DEFAULT_TEMPLATE ? " (ค่าเริ่มต้น)" : ""}`);
+        if (t.description) out(`  ${t.description}`);
+        out(`  ตำแหน่ง: ${t.roles.length ? `${t.roles.join(" → ")} (+reviewer)` : "ทุกตำแหน่ง"} · งานผลิตไม่เกิน ${t.maxTasks} ชิ้น · QA ผ่านที่ ${t.passScore} · งบแนะนำ ${t.budget ? `$${t.budget}/โจทย์` : "ไม่จำกัด"}`);
+        if (t.skills.length) out(`  ทักษะเฉพาะประเภท: ${t.skills.map((s) => `skills/${s}.md`).join(", ")}`);
+        if (t.examples[0]) out(`  ตัวอย่างโจทย์: ${t.examples[0]}`);
+      }
+      out("");
+      out(`รวม ${list.length} แม่แบบ · วิธีเลือกและปรับใช้: docs/08-playbook.md`);
+      break;
+    }
     case "init": {
       const dir = positional[0];
-      if (!dir) die('ใช้: init <โฟลเดอร์โปรเจกต์> [--id myshop] [--name "ชื่อ"]');
-      const { initPack } = await import(path.join(here, "..", "server", "projects.js").replace(/\\/g, "/").replace(/^([A-Za-z]):/, "file:///$1:"));
-      const r = initPack(dir, { id: flags.id, name: flags.name, register: true });
-      out(`✔ สร้าง ${r.packDir} แล้ว (id: ${r.id})`);
+      if (!dir) die('ใช้: init <โฟลเดอร์โปรเจกต์> [--template webapp] [--id myshop] [--name "ชื่อ"]   (ดูแม่แบบทั้งหมด: templates)');
+      const P = await projectsModule();
+      const r = P.initPack(dir, { id: flags.id, name: flags.name, template: flags.template, register: true });
+      out(`✔ สร้าง ${r.packDir} แล้ว (id: ${r.id}, แม่แบบ: ${r.template})`);
+      if (r.skills.length) out(`  ทักษะเฉพาะประเภทที่ใส่ให้: ${r.skills.map((s) => `skills/${s}.md`).join(", ")}`);
       out(`  ไฟล์แนะนำที่พบและจะถูกอ่านทุกครั้ง: ${r.always.length ? r.always.join(", ") : "ไม่มี (แก้ context.always ใน project.json)"}`);
-      out(`  ขั้นต่อไป: แก้ ${path.join(r.packDir, "brief.md")} ให้ตรงกับโปรเจกต์ แล้วลอง: context ${r.id}`);
+      out(`  ขั้นต่อไป: แก้ ${path.join(r.packDir, "brief.md")} ให้ตรงกับโปรเจกต์ → ตรวจด้วย: doctor ${r.id} → ลอง: context ${r.id}`);
       if (await serverUp()) await api("POST", "/api/projects/reload");
       else out("  (เซิร์ฟเวอร์ยังไม่เปิด — ทะเบียนถูกเขียนลง data/projects.json แล้ว จะเห็นเมื่อเปิดเซิร์ฟเวอร์)");
       break;
+    }
+    case "doctor": {
+      const P = await projectsModule();
+      const id = resolveProjectIdOffline(P, positional[0]);
+      const d = P.doctorPack(id);
+      out(`🩺 ตรวจโปรเจกต์ ${d.name} (${d.id}) — ${d.root}`);
+      for (const f of d.findings) {
+        out(`  ${DOCTOR_ICON[f.level] || "·"} ${f.message}`);
+        if (f.hint && f.level !== "ok") out(`     → ${f.hint}`);
+      }
+      const warns = d.findings.filter((f) => f.level === "warn").length;
+      out("");
+      if (warns) out(`${warns} ข้อควรแก้ก่อนสั่งงานจริง (ยังสั่งงานได้ แต่ผลอาจไม่ตรงกับโปรเจกต์) — แก้แล้วรัน doctor ซ้ำ`);
+      else out(`✔ พร้อมใช้งาน — ลอง: context ${d.id}   แล้วสั่งงาน: run "<โจทย์>" --project ${d.id} --wait`);
+      process.exit(warns ? 1 : 0);
     }
     case "register": {
       const [id, dir] = positional;
@@ -186,7 +243,7 @@ async function main() {
     }
     case "projects": {
       const { projects } = await api("GET", "/api/projects");
-      if (!projects.length) out("ยังไม่มีโปรเจกต์ — ใช้: init <โฟลเดอร์> --id <id>");
+      if (!projects.length) out("ยังไม่มีโปรเจกต์ — ใช้: init <โฟลเดอร์> --id <id> [--template <ชื่อ>]");
       for (const p of projects) out(`${p.ok ? "✔" : "✖"} ${p.id.padEnd(14)} ${p.name.padEnd(24)} ${p.root}${p.ok ? "" : `  (${p.error})`}`);
       break;
     }
@@ -196,6 +253,9 @@ async function main() {
       const q = new URLSearchParams({ role, ...(flags.tokens ? { tokens: "1" } : {}), fresh: "1" });
       const c = await api("GET", `/api/projects/${encodeURIComponent(id)}/context?${q}`);
       out(`โปรเจกต์ ${c.name} (${c.id}) — ${c.root}`);
+      const tplId = typeof c.config?.template === "string" ? c.config.template : "";
+      const tpl = tplId ? (await projectsModule()).listTemplates().find((t) => t.id === tplId) : null;
+      out(`แม่แบบ: ${tplId ? `${tplId}${tpl ? ` (${tpl.title})` : " (ไม่มีแม่แบบนี้ในศูนย์ควบคุม)"}` : "ไม่ระบุ (เทียบเท่า generic)"} · ตำแหน่งที่ใช้: ${c.config?.plan?.roles?.length ? `${c.config.plan.roles.join(", ")} (+reviewer)` : "ทุกตำแหน่ง"} · งบ/โจทย์: ${c.config?.budget?.maxUsdPerJob ? `$${c.config.budget.maxUsdPerJob}` : c.config?.budget?.maxUsdPerJob === 0 ? "ไม่จำกัด" : "ไม่ได้ตั้ง"}`);
       out(`บริบทสำหรับตำแหน่ง ${role}: system ${c.systemChars.toLocaleString()} + ข้อมูล ${c.dataChars.toLocaleString()} ตัวอักษร ≈ ${c.estTokens.toLocaleString()} โทเคน${c.inputTokens != null ? ` (นับจริง ${c.inputTokens.toLocaleString()})` : ""}`);
       out(`ดัชนีเอกสาร ${c.docsIndex} รายการ · โครงสร้างไฟล์ ${c.tree} รายการ`);
       out("ไฟล์ที่ใส่ให้:");
@@ -262,8 +322,10 @@ async function main() {
     }
     default:
       out("grock — สั่งงานทีม AI ให้โปรเจกต์อื่น");
-      out('  init <โฟลเดอร์> [--id x] [--name n]   สร้าง .grock/ และลงทะเบียน');
-      out("  projects                              รายชื่อโปรเจกต์");
+      out("  templates                              รายการแม่แบบ .grock/ ต่อประเภทโปรเจกต์");
+      out('  init <โฟลเดอร์> [--template t] [--id x] [--name n]   สร้าง .grock/ จากแม่แบบ และลงทะเบียน');
+      out("  doctor <id|.>                          ตรวจว่า brief/ไฟล์/งบ พร้อมสั่งงานหรือยัง");
+      out("  projects                               รายชื่อโปรเจกต์");
       out("  context <id|.> [--role r] [--tokens] [--full]");
       out('  run "<โจทย์>" --project <id|.> [--files a,b] [--wait]   (หรือ --goal-file ไฟล์)');
       out("  status <jobId>");

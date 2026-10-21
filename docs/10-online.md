@@ -9,7 +9,7 @@
 | สถานะถาวร | `server/state-db.js` | SQLite `data/state.db` (node:sqlite) write-through — รีสตาร์ตแล้วโจทย์เก่า/ผลงาน/ตัวชี้วัดยังอยู่ |
 | โค้ดขึ้น GitHub | `server/gitpush.js` | โปรเจกต์ที่เปิด `git.pushBranch` → branch `grock/<jobId>` รออนุมัติบนแดชบอร์ดก่อน push ด้วย git ของเครื่อง |
 
-ทดสอบทั้งหมดในโหมด `sim` กับ S3 จำลองในเครื่อง (`npm test` → `test-storage`, `test-state-db`, `test-auth`, `e2e-online`) ไม่เรียก API จริง
+ทดสอบทั้งหมดในโหมด `sim` กับ S3 จำลองในเครื่อง (`npm test` รันทุกไฟล์ใน `tools/tests/` รวม `test-storage`, `test-state-db`, `test-auth`, `e2e-online` และเทสต์แม่แบบ `test-templates`/`e2e-templates`) ไม่เรียก API จริง
 
 ## 1. ชนิดข้อมูล → ที่เก็บ
 

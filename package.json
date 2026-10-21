@@ -12,6 +12,8 @@
     "telegram": "node --env-file-if-exists=.env tools/telegram-bot.mjs",
     "smoke:live": "node --env-file-if-exists=.env tools/smoke-live.mjs",
     "test": "node tools/tests/run.mjs",
+    "test:unit": "node tools/tests/run.mjs test-",
+    "test:e2e": "node tools/tests/run.mjs e2e-",
     "tunnel": "cloudflared tunnel --url http://127.0.0.1:3789"
   },
   "engines": {

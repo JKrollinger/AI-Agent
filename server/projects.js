@@ -6,6 +6,7 @@
 //   out/<jobId>/  ผลงานที่ระบบเขียนกลับ (result.md, tasks/NN-*.md, plan.json, job.json, patches/NN-*.diff) + out/latest.md
 // project.json อาจให้สิทธิ์ "แก้ไฟล์จริง" เป็นรายเอเจนต์ (permissions.<agentId>) → ดู apply.js (Claude Code headless + ด่านอนุมัติ)
 // ศูนย์ควบคุมเก็บทะเบียนโปรเจกต์ (id → path) ใน data/projects.json
+// แม่แบบ .grock/ ต่อประเภทโปรเจกต์อยู่ใน server/templates/<ชื่อ>/ (initPack(dir, { template }), listTemplates, doctorPack)
 // ไฟล์ของโปรเจกต์ (README/CLAUDE.md/docs) ถูกใส่ใน prompt เป็น "ข้อมูลอ้างอิง" ไม่ใช่คำสั่ง และผ่านการปิดบังค่าลับก่อนเสมอ
 import fs from "node:fs";
 import path from "node:path";
@@ -19,6 +20,7 @@ export const REGISTRY_FILE = path.join(DATA_DIR, "projects.json");
 export const TEMPLATES_DIR = path.join(here, "templates");
 export const PACK_DIR = ".grock";
 export const PROJECT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+export const TEMPLATE_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/; // ชื่อแม่แบบ = ชื่อโฟลเดอร์ใต้ server/templates/ เท่านั้น (ไม่ใช่ path)
 const MAX_SKILL_CHARS = 6000;
 const MAX_BRIEF_CHARS = 6000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -479,8 +481,16 @@ function normalizeConfig(raw, warnings) {
     planRoles.length = 0;
   }
   const placement = ctx.placement === "system" ? "system" : "user";
+  // ชื่อแม่แบบที่ใช้สร้าง .grock/ (ไว้แสดงใน context/doctor ไม่มีผลต่อการทำงาน)
+  let template = "";
+  if (c.template !== undefined && c.template !== null && c.template !== "") {
+    const t = typeof c.template === "string" ? stripCtl(c.template).trim().toLowerCase() : "";
+    if (TEMPLATE_NAME_RE.test(t)) template = t;
+    else warnings.push(`template "${stripCtl(String(c.template)).slice(0, 40)}" ไม่ถูกต้อง (ต้องเป็น a-z 0-9 -) — ข้าม`);
+  }
   return {
     name: typeof c.name === "string" ? stripCtl(c.name).trim().slice(0, 80) : "",
+    template,
     context: {
       always: asArray(ctx.always) ?? [...DEFAULT_CONFIG.context.always],
       docsIndex: asArray(ctx.docsIndex) ?? [...DEFAULT_CONFIG.context.docsIndex],
@@ -920,9 +930,66 @@ export function attachWriter(bus, { agentNameOf = () => "" } = {}) { // agentNam
 }
 
 // ---------------------------------------------------------------------------
-// สร้าง .grock/ ให้โปรเจกต์ใหม่ (ใช้โดย CLI)
+// แม่แบบ .grock/ ต่อประเภทโปรเจกต์ (server/templates/<ชื่อ>/) + สร้าง .grock/ ให้โปรเจกต์ใหม่ + ตรวจความพร้อม (ใช้โดย CLI)
+// โครงของแม่แบบ: project.json (ค่าตั้งต้น), brief.md (โครงให้กรอก), skills/<ตำแหน่ง>.md (ทักษะเฉพาะประเภท),
+//                template.json (ชื่อ/คำอธิบาย/ตัวอย่างโจทย์ สำหรับรายการ — ไม่ถูกคัดลอกเข้า .grock/)
 // ---------------------------------------------------------------------------
-export function initPack(dir, { id, name, register = true } = {}) {
+export const DEFAULT_TEMPLATE = "generic";
+const TEMPLATE_META_FILE = "template.json";
+const SHARED_SKILLS_README = "skills-README.md"; // คู่มือเขียนทักษะ ใส่ให้ทุกแม่แบบเป็น skills/README.md
+
+/** รายการแม่แบบที่มีอยู่จริงใต้ templates/ (= allow-list ของชื่อที่ init รับ) เรียง generic ก่อน */
+export function listTemplates() {
+  let entries = [];
+  try { entries = fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true }); } catch { return []; }
+  const num = (v, dflt) => (Number.isFinite(Number(v)) ? Number(v) : dflt);
+  const out = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || !TEMPLATE_NAME_RE.test(e.name)) continue;
+    const dir = path.join(TEMPLATES_DIR, e.name);
+    let cfg, meta = {};
+    try { cfg = JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8")); } catch { continue; }
+    try { meta = JSON.parse(fs.readFileSync(path.join(dir, TEMPLATE_META_FILE), "utf8")) || {}; } catch {}
+    const plan = cfg?.plan && typeof cfg.plan === "object" ? cfg.plan : {};
+    let skills = [];
+    try { skills = fs.readdirSync(path.join(dir, "skills")).filter((f) => /^[a-z]+\.md$/.test(f) && ROLES[f.slice(0, -3)]).map((f) => f.slice(0, -3)).sort(); } catch {}
+    const b = cfg?.budget?.maxUsdPerJob;
+    out.push({
+      id: e.name,
+      title: typeof meta.title === "string" && meta.title.trim() ? stripCtl(meta.title).trim().slice(0, 60) : e.name,
+      description: typeof meta.description === "string" ? stripCtl(meta.description).trim().slice(0, 300) : "",
+      examples: (Array.isArray(meta.examples) ? meta.examples : []).filter((x) => typeof x === "string" && x.trim()).map((x) => stripCtl(x).trim().slice(0, 200)).slice(0, 5),
+      roles: asArray(plan.roles) || [],
+      maxTasks: num(plan.maxTasks, DEFAULT_CONFIG.plan.maxTasks),
+      passScore: num(cfg?.qa?.passScore, DEFAULT_CONFIG.qa.passScore),
+      budget: b === undefined || b === null ? null : num(b, null),
+      skills,
+      roleOverrides: Object.keys(cfg?.roles && typeof cfg.roles === "object" ? cfg.roles : {}),
+    });
+  }
+  return out.sort((a, b) => (a.id === DEFAULT_TEMPLATE ? -1 : b.id === DEFAULT_TEMPLATE ? 1 : a.id.localeCompare(b.id)));
+}
+
+/**
+ * ตรวจชื่อแม่แบบกับ allow-list: ต้องเป็น a-z 0-9 - และตรงกับโฟลเดอร์ที่มีอยู่จริงใต้ templates/ เท่านั้น
+ * (ไม่รับ path ใด ๆ จึงไม่มีทาง ../ ออกนอกโฟลเดอร์ และตรวจ realpath ซ้ำอีกชั้น) → { id, dir, title, roles, ... }
+ */
+export function resolveTemplate(name = DEFAULT_TEMPLATE) {
+  if (name === undefined || name === null || name === "") name = DEFAULT_TEMPLATE;
+  const all = listTemplates();
+  if (typeof name !== "string") throw new Error(`ต้องระบุชื่อแม่แบบ — ที่มี: ${all.map((t) => t.id).join(", ")}`);
+  const n = stripCtl(name).trim().toLowerCase();
+  if (!TEMPLATE_NAME_RE.test(n)) throw new Error(`ชื่อแม่แบบ "${n.slice(0, 40)}" ไม่ถูกต้อง (ใช้ a-z 0-9 - เท่านั้น ไม่ใช่ path)`);
+  const hit = all.find((t) => t.id === n);
+  if (!hit) throw new Error(`ไม่มีแม่แบบ "${n}" — ที่มี: ${all.map((t) => t.id).join(", ")}`);
+  const dir = path.join(TEMPLATES_DIR, n);
+  const rel = path.relative(fs.realpathSync.native(TEMPLATES_DIR), fs.realpathSync.native(dir));
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || rel.includes(path.sep) || rel.includes("/")) throw new Error(`แม่แบบ "${n}" อยู่นอกโฟลเดอร์ templates/`);
+  return { ...hit, dir };
+}
+
+/** สร้าง <dir>/.grock/ จากแม่แบบ (คัดลอกทั้งโฟลเดอร์ ยกเว้น template.json) เติม name/template/context.always แล้วลงทะเบียน */
+export function initPack(dir, { id, name, register = true, template = DEFAULT_TEMPLATE } = {}) {
   const abs = path.resolve(String(dir || "").trim());
   if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) throw new Error(`ไม่พบโฟลเดอร์ ${abs}`);
   const forbidden = isForbiddenRoot(abs);
@@ -932,17 +999,21 @@ export function initPack(dir, { id, name, register = true } = {}) {
   if (fs.existsSync(path.join(packDir, "project.json"))) throw new Error(`มี ${PACK_DIR}/project.json อยู่แล้ว — ไม่เขียนทับ`);
   const pid = id || slugify(path.basename(real)).replace(/[^a-z0-9_-]/g, "").slice(0, 32) || "project";
   if (!PROJECT_ID_RE.test(pid)) throw new Error(`id "${pid}" ไม่ถูกต้อง (a-z 0-9 - _)`);
+  const tpl = resolveTemplate(template); // ตรวจชื่อกับ allow-list ก่อนแตะดิสก์
+  fs.cpSync(tpl.dir, packDir, { recursive: true, filter: (src) => path.basename(src) !== TEMPLATE_META_FILE });
   fs.mkdirSync(path.join(packDir, "skills"), { recursive: true });
   fs.mkdirSync(path.join(packDir, "out"), { recursive: true });
+  fs.copyFileSync(path.join(TEMPLATES_DIR, SHARED_SKILLS_README), path.join(packDir, "skills", "README.md"));
   // ตรวจว่ามีไฟล์แนะนำโปรเจกต์ไฟล์ไหนอยู่จริง
   const candidates = ["CLAUDE.md", "AGENTS.md", "README.md", "CONTRIBUTING.md"];
   const always = candidates.filter((f) => fs.existsSync(path.join(real, f)));
-  const template = JSON.parse(fs.readFileSync(path.join(TEMPLATES_DIR, "project.json"), "utf8"));
-  template.name = name || path.basename(real);
-  template.context.always = always.length ? always : template.context.always;
-  fs.writeFileSync(path.join(packDir, "project.json"), JSON.stringify(template, null, 2) + "\n", "utf8");
-  fs.copyFileSync(path.join(TEMPLATES_DIR, "brief.md"), path.join(packDir, "brief.md"));
-  fs.copyFileSync(path.join(TEMPLATES_DIR, "skills-README.md"), path.join(packDir, "skills", "README.md"));
+  const cfg = JSON.parse(fs.readFileSync(path.join(packDir, "project.json"), "utf8"));
+  cfg.name = (typeof name === "string" && stripCtl(name).trim().slice(0, 80)) || path.basename(real);
+  cfg.template = tpl.id;
+  cfg.context = cfg.context && typeof cfg.context === "object" ? cfg.context : {};
+  cfg.context.always = always.length ? always : cfg.context.always;
+  const ordered = { name: cfg.name, template: cfg.template, ...cfg }; // ให้ name/template อยู่บนสุดเสมอ
+  fs.writeFileSync(path.join(packDir, "project.json"), JSON.stringify(ordered, null, 2) + "\n", "utf8");
   // กันผลงานขึ้น git ของโปรเจกต์นั้น
   const gi = path.join(real, ".gitignore");
   const line = `${PACK_DIR}/out/`;
@@ -950,6 +1021,82 @@ export function initPack(dir, { id, name, register = true } = {}) {
     const cur = fs.existsSync(gi) ? fs.readFileSync(gi, "utf8") : "";
     if (!cur.split(/\r?\n/).some((l) => l.trim() === line)) fs.appendFileSync(gi, `${cur && !cur.endsWith("\n") ? "\n" : ""}${line}\n`, "utf8");
   } catch {}
-  const entry = register ? registerProject(pid, real, { name: template.name }) : { id: pid, path: real.split(path.sep).join("/") };
-  return { id: pid, root: real, packDir, always, entry };
+  const entry = register ? registerProject(pid, real, { name: cfg.name }) : { id: pid, path: real.split(path.sep).join("/") };
+  return { id: pid, root: real, packDir, always, entry, template: tpl.id, skills: tpl.skills };
+}
+
+// ---------------------------------------------------------------------------
+// doctor: ตรวจว่า .grock/ ของโปรเจกต์พร้อมสั่งงานจริงหรือยัง (brief ยังเป็นโครง? ไฟล์ใน context.always มีไหม? ตั้งงบหรือยัง?)
+// ---------------------------------------------------------------------------
+const normWs = (s) => String(s || "").replace(/\s+/g, " ").trim();
+
+/** บรรทัดใน brief ที่ยังเป็นช่องว่างของแม่แบบ: ทั้งบรรทัด (หรือค่าหลัง "ป้าย:") ยังเป็น "(…)" หรือ "- ป้าย:" ที่ไม่มีค่าและไม่มีหัวข้อย่อยตามหลัง */
+export function briefPlaceholders(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(#|<!--)/.test(line)) continue;
+    const m = /^\s*(?:[-*]\s+)?(?:([^:：()]{1,60})[:：])?\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    const [, label, value] = m;
+    if (/^\(.{2,}\)$/.test(value)) { out.push(line.trim()); continue; }
+    if (label && value === "") {
+      const next = lines.slice(i + 1).find((l) => l.trim());
+      if (!next || !/^\s+[-*]\s/.test(next)) out.push(line.trim());
+    }
+  }
+  return out;
+}
+
+/** ตรวจความพร้อมของ .grock/ → { id, name, root, template, ok, findings: [{ level: "warn"|"info"|"ok", message, hint }] } */
+export function doctorPack(id) {
+  const pack = loadPack(id, { force: true });
+  const findings = [];
+  const add = (level, message, hint = "") => findings.push({ level, message, hint });
+  const packDir = path.join(pack.root, PACK_DIR);
+  const templates = listTemplates();
+  const tpl = pack.config.template ? templates.find((t) => t.id === pack.config.template) : null;
+
+  for (const w of pack.warnings) if (!w.startsWith("ไม่มี brief.md")) add("warn", `project.json: ${w}`, "แก้ค่าใน .grock/project.json ให้ถูกต้อง (ดู docs/07-projects.md)");
+  if (pack.config.template && !tpl) add("info", `แม่แบบ "${pack.config.template}" ไม่มีในศูนย์ควบคุมนี้ (ไม่มีผลต่อการทำงาน)`);
+  else add("ok", tpl ? `แม่แบบ: ${tpl.id} (${tpl.title})` : "ไม่ได้ระบุแม่แบบ (เทียบเท่า generic)");
+
+  // brief.md
+  const briefText = normWs(pack.brief);
+  const briefFile = path.join(packDir, "brief.md");
+  if (!briefText) add("warn", "ไม่มี brief.md หรือว่างเปล่า — ทีมจะไม่รู้ว่าโปรเจกต์นี้คืออะไร", `เขียน ${briefFile}: เป้าหมาย ผู้ใช้ กติกา สิ่งห้ามทำ และนิยามคำว่าเสร็จ`);
+  else {
+    const originals = (tpl ? [tpl] : templates).map((t) => { try { return normWs(readTextFile(path.join(TEMPLATES_DIR, t.id, "brief.md"), MAX_BRIEF_CHARS).text); } catch { return ""; } });
+    const ph = briefPlaceholders(pack.brief);
+    if (originals.some((o) => o && o === briefText)) add("warn", "brief.md ยังเป็นโครงว่างจากแม่แบบ (ยังไม่ได้แก้เลย)", `แก้ ${briefFile} แทนที่ข้อความในวงเล็บทุกจุดด้วยข้อมูลจริงของโปรเจกต์`);
+    else if (ph.length) add("warn", `brief.md ยังมีช่องที่ยังไม่ได้กรอก ${ph.length} จุด เช่น "${ph[0].slice(0, 60)}"`, "แทนที่ข้อความในวงเล็บด้วยข้อมูลจริง หรือลบบรรทัดที่ไม่ใช้ออก");
+    else add("ok", `brief.md กรอกแล้ว (${pack.brief.length.toLocaleString()} ตัวอักษร)`);
+  }
+
+  // context.always
+  const readable = pack.docs.filter((d) => !d.skippedReason && d.text);
+  for (const d of pack.docs) {
+    if (!d.skippedReason) continue;
+    add("warn", `context.always: ${d.path} — ${d.skippedReason}`, d.optional ? "สร้างไฟล์นั้น หรือเอาออกจาก context.always ใน project.json" : "แก้ path ใน context.always ให้ชี้ไฟล์ข้อความภายในโปรเจกต์");
+  }
+  if (!readable.length) add("warn", "ไม่มีไฟล์ใน context.always ที่อ่านได้เลย — ทีมจะเห็นแค่ brief.md", 'ใส่ README.md หรือเอกสารหลักของโปรเจกต์ใน context.always (หรือ "docs/x.md#หัวข้อ")');
+  else add("ok", `ไฟล์ที่ให้ทีมอ่านทุกครั้ง: ${readable.map((d) => d.path).join(", ")}`);
+
+  // งบ
+  const b = pack.config.budget.maxUsdPerJob;
+  const rec = tpl?.budget || 2;
+  if (b === null) add("warn", "งบต่อโจทย์ยังไม่ได้ตั้ง (budget.maxUsdPerJob) — จะใช้ MAX_USD_PER_JOB ใน .env ของศูนย์ควบคุม ถ้าไม่มีก็ไม่จำกัด", `ใส่ "budget": { "maxUsdPerJob": ${rec} } ใน project.json (ค่าแนะนำของแม่แบบนี้)`);
+  else if (b === 0) add("warn", "งบต่อโจทย์ตั้งเป็น 0 = ไม่จำกัด", `ตั้ง budget.maxUsdPerJob เป็นตัวเลข เช่น ${rec} เพื่อให้ระบบหยุดเมื่อใช้เงินเกิน`);
+  else add("ok", `งบต่อโจทย์ $${b}`);
+
+  // ตำแหน่ง
+  const roles = pack.config.plan.roles;
+  if (!roles.length) add("info", "plan.roles ว่าง = กัปตันใช้ได้ทุกตำแหน่ง (แพงกว่า)", 'จำกัดเฉพาะตำแหน่งที่จำเป็น เช่น ["researcher", "coder"] ดูตารางใน docs/08-playbook.md');
+  else add("ok", `ตำแหน่งที่ใช้: ${roles.join(", ")} (+reviewer) · งานผลิตไม่เกิน ${pack.config.plan.maxTasks} ชิ้น`);
+
+  const skills = Object.keys(pack.skills);
+  if (skills.length) add("ok", `ทักษะเฉพาะโปรเจกต์: ${skills.join(", ")}`);
+
+  return { id: pack.id, name: pack.name, root: pack.rootPosix, template: pack.config.template, findings, ok: !findings.some((f) => f.level === "warn") };
 }

@@ -80,19 +80,21 @@ copy .env.example .env
 
 ## ใช้งานกับโปรเจกต์อื่น (Project Pack)
 
-ให้ทีม AI ทำงานให้โปรเจกต์ของคุณโดยอ่านเอกสารของโปรเจกต์นั้น (README/CLAUDE.md/docs) และเขียนผลงานกลับเข้าโฟลเดอร์โปรเจกต์:
+ให้ทีม AI ทำงานให้โปรเจกต์ของคุณโดยอ่านเอกสารของโปรเจกต์นั้น (README/CLAUDE.md/docs) และเขียนผลงานกลับเข้าโฟลเดอร์โปรเจกต์ เริ่มจากแม่แบบ `.grock/` สำเร็จรูปตามประเภทโปรเจกต์ (generic, webapp, marketing, research, data, business):
 
 ```bash
-node tools/grock.mjs init "C:\Projects\MyShop" --id myshop
+node tools/grock.mjs templates                                        # ดูแม่แบบทั้งหมด
+node tools/grock.mjs init "C:\Projects\MyShop" --id myshop --template webapp
+node tools/grock.mjs doctor myshop                                    # ตรวจว่า brief/ไฟล์/งบ พร้อมหรือยัง
 ```
 
-แก้ `C:\Projects\MyShop\.grock\brief.md` ให้ตรงกับโปรเจกต์ แล้วสั่งงาน (จากโฟลเดอร์ไหนก็ได้ หรือจาก Claude Code ที่เปิดอยู่ในโปรเจกต์นั้น):
+แก้ `C:\Projects\MyShop\.grock\brief.md` ให้ตรงกับโปรเจกต์ (แม่แบบตั้งตำแหน่งที่ใช้ โมเดล QA งบ และทักษะเฉพาะประเภทให้แล้ว) แล้วสั่งงาน (จากโฟลเดอร์ไหนก็ได้ หรือจาก Claude Code ที่เปิดอยู่ในโปรเจกต์นั้น):
 
 ```bash
 node tools/grock.mjs run "เขียนแผนทดสอบสำหรับโมดูลชำระเงิน" --project myshop --wait
 ```
 
-ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md)
+ผลงานอยู่ที่ `<โปรเจกต์>/.grock/out/<jobId>/result.md` (และ `latest.md`) หรือเลือกโปรเจกต์จากช่องข้างปุ่ม "มอบหมายงาน" บนหน้าเว็บ รายละเอียดการตั้งค่าต่อโปรเจกต์ (ไฟล์ที่ให้อ่าน ตำแหน่งที่ใช้ได้ โมเดล/หน้าที่/ทักษะเฉพาะโปรเจกต์ งบ) อยู่ใน [docs/07-projects.md](docs/07-projects.md) และวิธีประยุกต์กับโปรเจกต์แต่ละประเภททีละขั้น (เลือกแม่แบบ ปรับ brief จำกัดตำแหน่ง ตั้งงบ สั่งจาก Claude Code อ่านผล) อยู่ใน [docs/08-playbook.md](docs/08-playbook.md)
 
 ### ให้ Developer แก้ไฟล์จริง (ผ่าน Claude Code headless + ด่านอนุมัติ)
 
@@ -107,7 +109,7 @@ node tools/grock.mjs run "เขียนแผนทดสอบสำหรั
 - ทุกขั้นมีบันทึกใน `task.history`, `logs/events.jsonl`, `job.json` และ `patches/*.json` · โหมด `sim` จำลอง patch ที่ apply ได้จริงเพื่อทดสอบ flow โดยไม่เสียเงิน · ไม่มี `claude` CLI หรือไม่ให้สิทธิ์ → ทำแบบข้อเสนอเหมือนเดิมพร้อม log บอกเหตุผล (ตั้ง `CLAUDE_BIN` ใน `.env` ถ้า `claude` ไม่อยู่ใน PATH)
 - รายละเอียดสิทธิ์ ด่านอนุมัติ audit และข้อจำกัด: [docs/07-projects.md §5](docs/07-projects.md)
 
-ทดสอบทั้งชุด (unit + e2e ในโหมด sim กับโปรเจกต์ชั่วคราวใน temp ไม่เรียก API จริง): `npm test`
+ทดสอบทั้งชุด (unit + e2e ในโหมด sim กับโปรเจกต์ชั่วคราวใน temp ไม่เรียก API จริง): `npm test` — เฉพาะ unit: `npm run test:unit` · เฉพาะ e2e: `npm run test:e2e` · บางไฟล์: `node tools/tests/run.mjs templates` (ทุกชุดรวมเทสต์แม่แบบ `test-templates`/`e2e-templates` ด้วย)
 
 ## เปิดใช้งานจากอินเทอร์เน็ต (Cloudflare Tunnel)
 
@@ -198,6 +200,7 @@ logs/     events.jsonl (สร้างอัตโนมัติ)
 - [docs/01-grok-architecture.md](docs/01-grok-architecture.md) — Grok 4 Heavy, Grok 4.20 (4 agents), Agent Tools API, Grok Build, Macrohard และสิ่งที่เรานำมาใช้
 - [docs/02-multi-agent-design.md](docs/02-multi-agent-design.md) — โมเดลข้อมูล วงจรชีวิตงาน กลไก handoff เหตุการณ์ ตัวชี้วัด และแนวทางขยายสู่การใช้งานจริง
 - [docs/07-projects.md](docs/07-projects.md) — Project Pack: ใช้ทีม AI กับโปรเจกต์อื่น (.grock/, CLI, ความปลอดภัยของไฟล์, ต้นทุน)
+- [docs/08-playbook.md](docs/08-playbook.md) — Playbook: ประยุกต์โมเดลต้นแบบกับโปรเจกต์ประเภทต่าง ๆ ด้วยแม่แบบ .grock/ (ตารางประเภท → ตำแหน่ง → งบ)
 - [docs/09-office3d.md](docs/09-office3d.md) — ออฟฟิศ 3 มิติ: การฝังในแดชบอร์ด, event → การเคลื่อนไหว, `config.js`, API `window.Office3D`, เพิ่มตัวละคร Mixamo
 - [docs/10-online.md](docs/10-online.md) — ใช้งานออนไลน์: ผลงานขึ้นคลาวด์ (R2/S3 ผ่าน SigV4 ไม่เพิ่ม dependency), ล็อกอิน `AUTH=token` + หน้า `/login` + rate limit, สถานะถาวร SQLite (`data/state.db`), branch `grock/<jobId>` ขึ้น GitHub พร้อมด่านอนุมัติ, ตาราง "ชนิดข้อมูล → ที่เก็บ", Dockerfile/docker-compose, ข้อควรระวังเรื่องคีย์
 - [docs/10-deploy-tunnel.md](docs/10-deploy-tunnel.md) — เปิดใช้งานจากอินเทอร์เน็ตด้วย Cloudflare Tunnel: รหัสผ่าน, `ALLOWED_HOSTS`, quick/named tunnel, Windows service, Cloudflare Access

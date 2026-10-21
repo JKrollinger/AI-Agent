@@ -1,0 +1,33 @@
+{
+  "name": "",
+  "template": "data",
+  "context": {
+    "always": ["CLAUDE.md", "AGENTS.md", "README.md"],
+    "docsIndex": ["docs/*.md", "docs/**/*.md", "data/**/*.md", "notebooks/**/*.md"],
+    "maxChars": 24000,
+    "placement": "user",
+    "maxCharsPerFile": 8000,
+    "tree": { "depth": 3, "maxEntries": 150, "ignore": ["raw", "output"] }
+  },
+  "plan": { "roles": ["coder", "researcher"], "maxTasks": 4 },
+  "roles": {
+    "coder": {
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "toolsEnabled": true,
+      "maxTokens": 24000,
+      "instructions": "เขียนสคริปต์วิเคราะห์ที่ทำซ้ำได้ (Python 3 + pandas เป็นค่าเริ่มต้น เว้นแต่ brief ระบุอื่น) รับ path ข้อมูลจาก argument ตรวจคุณภาพข้อมูล (ค่าหาย ซ้ำ ผิดช่วง ชนิดผิด) ก่อนวิเคราะห์ ทดสอบด้วย code_execution กับข้อมูลตัวอย่างสังเคราะห์ที่มีสคีมาเดียวกันเมื่อไม่มีข้อมูลจริงใน sandbox และติดป้ายชัดว่าผลที่แสดงมาจากข้อมูลตัวอย่าง ห้ามพิมพ์ข้อมูลส่วนบุคคลลงผลงาน"
+    },
+    "researcher": {
+      "instructions": "ค้นวิธีวิเคราะห์/สถิติที่เหมาะกับคำถามใน brief นิยามตัวชี้วัดให้ชัด (สูตร หน่วย ช่วงเวลา) และข้อควรระวังในการตีความ สรุปเป็นข้อกำหนดที่นักพัฒนานำไปเขียนสคริปต์ได้ทันที"
+    },
+    "reviewer": {
+      "instructions": "ตรวจเพิ่มสำหรับงานข้อมูล: สคริปต์รันได้จริงตามคู่มือ มีการตรวจคุณภาพข้อมูล แยกผลจากข้อมูลจริง/ตัวอย่างชัดเจน ไม่แต่งผลลัพธ์ การตีความไม่เกินหลักฐาน และไม่มีข้อมูลส่วนบุคคลหรือการแก้ไฟล์ต้นฉบับ"
+    }
+  },
+  "agents": {},
+  "qa": { "maxAttempts": 3, "passScore": 75 },
+  "budget": { "maxUsdPerJob": 2 },
+  "output": { "dir": ".grock/out" },
+  "cache": { "ttl": "5m" }
+}
